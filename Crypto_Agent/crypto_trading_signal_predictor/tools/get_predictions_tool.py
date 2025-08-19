@@ -1,7 +1,7 @@
 import asyncio
 from agents import function_tool
-from tools.data_collector_tool import get_coin_details
-from tools.apply_indicators_strategies_and_visualize import apply_indicators_strategies_and_visualize
+from functions.data_collector_tool import get_coin_details
+from functions.apply_indicators_strategies_and_visualize import apply_indicators_strategies_and_visualize
 
 NAME_TO_SYMBOL = {
     "bitcoin": "BTC",

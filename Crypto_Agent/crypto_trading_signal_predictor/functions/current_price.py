@@ -4,7 +4,7 @@ from agents import function_tool
 from dotenv import load_dotenv
 import os
 
-from tools.data_collector_tool import GetCoinDetailsOutput
+from functions.data_collector_tool import GetCoinDetailsOutput
 
 load_dotenv()
 

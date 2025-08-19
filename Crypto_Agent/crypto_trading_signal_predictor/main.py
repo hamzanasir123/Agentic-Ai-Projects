@@ -7,6 +7,7 @@ from tools.any_info_about_any_coin_tool import any_info_about_any_coin
 from tools.get_predictions_tool import get_predictions_tool
 from tools.news_about_crypto_tool import news_about_crypto
 from tools.ohlcv_tool import ohlcv_tool
+from tools.risk_management_tool import auto_compound_risk_management_tool
 from tools.swing_trading_tool import swing_trading_tool
 
 # --- Load environment variables ---
@@ -107,6 +108,7 @@ async def handle_user_message(user_input):
                 get_predictions_tool,
                 any_info_about_any_coin,
                 news_about_crypto,
+                auto_compound_risk_management_tool,
                 swing_trading_tool,
                 ohlcv_tool
             ],

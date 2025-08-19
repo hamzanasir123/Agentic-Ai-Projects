@@ -1,5 +1,5 @@
 from agents import function_tool
-from tools.data_collector_tool import get_coin_details
+from functions.data_collector_tool import get_coin_details
 
 NAME_TO_SYMBOL = {
     "bitcoin": "BTC",
@@ -45,4 +45,7 @@ async def ohlcv_tool(input: str):
     if response.ohlcv is None:
         print("Error:", response.error)
         return
-    return response , pair
+    return {
+        "pair": pair,
+        "ohlcv": [candle.model_dump() for candle in response.ohlcv]  # <-- always a list
+    }
