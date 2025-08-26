@@ -28,7 +28,6 @@ def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
         return 50  # fallback neutral
     return rsi.iloc[-1]
 
-
 def calculate_macd(prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, float]:
     ema_fast = prices.ewm(span=fast, adjust=False).mean()
     ema_slow = prices.ewm(span=slow, adjust=False).mean()
@@ -43,6 +42,52 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
     ranges = pd.concat([high_low, high_close, low_close], axis=1)
     true_range = ranges.max(axis=1)  # ✅ fix
     return true_range.rolling(window=period).mean().iloc[-1]
+
+def calculate_bollinger_bands(prices: pd.Series, period: int = 20, std_dev: float = 2.0):
+    sma = prices.rolling(window=period).mean()
+    rolling_std = prices.rolling(window=period).std()
+    upper_band = sma + (rolling_std * std_dev)
+    lower_band = sma - (rolling_std * std_dev)
+    return {
+        "sma": sma.iloc[-1],
+        "upper": upper_band.iloc[-1],
+        "lower": lower_band.iloc[-1]
+    }
+
+def calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0):
+    hl2 = (df['high'] + df['low']) / 2
+    atr = calculate_atr(df, period)
+    upper_band = hl2 + (multiplier * atr)
+    lower_band = hl2 - (multiplier * atr)
+
+    supertrend = [True] * len(df)  # True = Bullish, False = Bearish
+    final_upper_band = [0] * len(df)
+    final_lower_band = [0] * len(df)
+
+    for i in range(1, len(df)):
+        final_upper_band[i] = min(upper_band.iloc[i], final_upper_band[i-1]) if df['close'].iloc[i-1] > final_upper_band[i-1] else upper_band.iloc[i]
+        final_lower_band[i] = max(lower_band.iloc[i], final_lower_band[i-1]) if df['close'].iloc[i-1] < final_lower_band[i-1] else lower_band.iloc[i]
+
+        supertrend[i] = True if df['close'].iloc[i] > final_upper_band[i] else False
+
+    return {"supertrend": supertrend[-1], "upper_band": final_upper_band[-1], "lower_band": final_lower_band[-1]}
+
+def calculate_stochastic(df: pd.DataFrame, period: int = 14, smooth_k: int = 3, smooth_d: int = 3):
+    low_min = df['low'].rolling(window=period).min()
+    high_max = df['high'].rolling(window=period).max()
+    k = ((df['close'] - low_min) / (high_max - low_min)) * 100
+    d = k.rolling(window=smooth_d).mean()
+    return {"k": k.iloc[-1], "d": d.iloc[-1]}
+
+def calculate_adx(df: pd.DataFrame, period: int = 14):
+    df['TR'] = df[['high', 'low', 'close']].max(axis=1) - df[['high', 'low', 'close']].min(axis=1)
+    df['+DM'] = np.where((df['high'].diff() > df['low'].diff()) & (df['high'].diff() > 0), df['high'].diff(), 0.0)
+    df['-DM'] = np.where((df['low'].diff() > df['high'].diff()) & (df['low'].diff() > 0), df['low'].diff(), 0.0)
+    df['+DI'] = 100 * (df['+DM'].ewm(span=period).mean() / df['TR'].ewm(span=period).mean())
+    df['-DI'] = 100 * (df['-DM'].ewm(span=period).mean() / df['TR'].ewm(span=period).mean())
+    dx = (abs(df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI'])) * 100
+    adx = dx.ewm(span=period).mean()
+    return adx.iloc[-1]
 
 
 class Candle(BaseModel):
@@ -162,6 +207,10 @@ async def swing_trading_tool(
         atr = calculate_atr(df)
         ema_fast = close_prices.ewm(span=20, adjust=False).mean().iloc[-1]
         ema_slow = close_prices.ewm(span=50, adjust=False).mean().iloc[-1]
+        bb = calculate_bollinger_bands(close_prices)
+        supertrend = calculate_supertrend(df)
+        stoch = calculate_stochastic(df)
+        adx = calculate_adx(df)
 
         # --- Debug Printout ---
         print("\n=== Indicator Debug Log ===")
@@ -171,6 +220,10 @@ async def swing_trading_tool(
         print(f"MACD: {macd_data['macd']:.5f}, Signal: {macd_data['signal']:.5f}")
         print(f"ATR: {atr:.2f}")
         print(f"EMA Fast (20): {ema_fast:.2f}, EMA Slow (50): {ema_slow:.2f}")
+        print(f"Bollinger Bands → Upper: {bb['upper']:.2f}, Lower: {bb['lower']:.2f}")
+        print(f"SuperTrend → {'Bullish' if supertrend['supertrend'] else 'Bearish'}")
+        print(f"Stochastic → %K={stoch['k']:.2f}, %D={stoch['d']:.2f}")
+        print(f"ADX → {adx:.2f}")
         print("==========================\n")
 
         # --- Signal Logic (Weighted Voting) ---
@@ -195,45 +248,142 @@ async def swing_trading_tool(
 
         # EMA Cross
         if ema_fast > ema_slow:
+            trend_bias = "Bullish 📈"
             buy_score += 1
             indicators_used.append("EMA Bullish")
         elif ema_fast < ema_slow:
+            trend_bias = "Bearish 📉"
             sell_score += 1
             indicators_used.append("EMA Bearish")
+        else:
+            trend_bias = "Sideways ➡️"
 
-        # Final Signal
+
+        # Bollinger Bands
+        bb = calculate_bollinger_bands(close_prices)
+        if close_prices.iloc[-1] <= bb["lower"]:  # price at/below lower band → possible reversal
+            buy_score += 1
+            indicators_used.append("BB Lower (Rebound)")
+        elif close_prices.iloc[-1] >= bb["upper"]:  # price at/above upper band → overextended
+            sell_score += 1
+            indicators_used.append("BB Upper (Overbought)")
+
+        # SuperTrend
+        supertrend = calculate_supertrend(df)
+        if supertrend["supertrend"]:  # bullish trend
+            buy_score += 1
+            indicators_used.append("SuperTrend Bullish")
+        else:  # bearish trend
+            sell_score += 1
+            indicators_used.append("SuperTrend Bearish")
+
+        # Stochastic
+        stoch = calculate_stochastic(df)
+        if stoch["k"] < 20 and stoch["d"] < 20:  # oversold
+            buy_score += 1
+            indicators_used.append("Stochastic Oversold")
+        elif stoch["k"] > 80 and stoch["d"] > 80:  # overbought
+            sell_score += 1
+            indicators_used.append("Stochastic Overbought")
+
+        # ADX
+        adx = calculate_adx(df)
+        if adx > 25:  # strong trend confirmation
+            if trend_bias.startswith("Bullish"):
+                buy_score += 1
+                indicators_used.append("ADX Strong Trend (Bullish)")
+            elif trend_bias.startswith("Bearish"):
+                sell_score += 1
+                indicators_used.append("ADX Strong Trend (Bearish)")
+
+# --- Final Signal with Weak States ---
         if buy_score > sell_score:
-            signal = "Strong Buy"
+            if buy_score == 5:
+                signal = "Strong Buy"
+            else:
+                signal = "Weak Buy"
         elif sell_score > buy_score:
-            signal = "Strong Sell"
+            if sell_score == 5:
+                signal = "Strong Sell"
+            else:
+                signal = "Weak Sell"
         else:
             signal = "Neutral"
 
         # --- Risk Management ---
         entry_price = last_price
 
-        if signal == "Strong Buy":
-            stop_loss = entry_price - atr
-            take_profit = entry_price + (atr * risk_reward_target)
-        elif signal == "Strong Sell":
-            stop_loss = entry_price + atr
-            take_profit = entry_price - (atr * risk_reward_target)
-        else:  # Neutral case → provide both sides, default long bias
-            stop_loss = entry_price - atr
-            take_profit = entry_price + (atr * risk_reward_target)
+        # ATR multipliers based on signal strength
+        if "Strong" in signal:
+            atr_multiplier = 1.5    # wider stop-loss for strong signals
+            rr_multiplier = risk_reward_target  # e.g., 2.0
+        elif "Weak" in signal:
+            atr_multiplier = 0.8    # tighter stop-loss for weak signals
+            rr_multiplier = risk_reward_target * 0.75  # smaller TP target
+        else:
+            atr_multiplier = 1.0    # neutral default
+            rr_multiplier = risk_reward_target * 0.5
 
-        # --- Confidence Score ---
-        confidence_score = round(abs(buy_score - sell_score) / 3, 2)
+        # Stop-loss & take-profit placement
+        if "Buy" in signal:
+            stop_loss = entry_price - (atr * atr_multiplier)
+            take_profit = entry_price + (atr * rr_multiplier)
+        elif "Sell" in signal:
+            stop_loss = entry_price + (atr * atr_multiplier)
+            take_profit = entry_price - (atr * rr_multiplier)
+        else:  # Neutral → follow overall trend bias
+            if "Bullish" in trend_bias:
+                stop_loss = entry_price - (atr * atr_multiplier)
+                take_profit = entry_price + (atr * rr_multiplier)
+            elif "Bearish" in trend_bias:
+                stop_loss = entry_price + (atr * atr_multiplier)
+                take_profit = entry_price - (atr * rr_multiplier)
+            else:  # Sideways
+                # keep symmetric placement (no clear direction)
+                stop_loss = entry_price - (atr * atr_multiplier)
+                take_profit = entry_price + (atr * rr_multiplier)
+
+        # --- Confidence Score (as percentage) ---
+        total_indicators = 7
+        confidence_raw = max(buy_score, sell_score) / total_indicators
+        confidence_score = round(confidence_raw * 100)  # convert to %
+
+        # --- Emoji Mapping ---
+        signal_emojis = {
+            "Strong Buy": "🟢 Strong Buy",
+            "Weak Buy": "🟡 Weak Buy",
+            "Strong Sell": "🔴 Strong Sell",
+            "Weak Sell": "🟠 Weak Sell",
+            "Neutral": "⚪ Neutral"
+        }
+
+        # Add emoji version of the signal
+        signal_with_emoji = signal_emojis.get(signal, signal)
+
+        # --- Build Human-Readable Summary ---
+        summary = (
+            f"📊 Swing Trade Signal for {pair}\n"
+            f"Signal: {signal_with_emoji} (Confidence: {confidence_score}%)\n"
+            f"Overall Trend: {trend_bias}\n"
+            f"Entry: {entry_price:.2f}\n"
+            f"Stop Loss: {stop_loss:.2f}\n"
+            f"Take Profit: {take_profit:.2f}\n"
+            f"Risk-Reward Ratio: {risk_reward_target}\n"
+            f"Indicators Used: {', '.join(indicators_used) if indicators_used else 'None'}"
+        )
 
         return {
             "pair": pair,
             "signal": signal,
+            "signal_with_emoji": signal_with_emoji,
+            "trend_bias": trend_bias,
             "entry_price": round(entry_price, 2),
             "stop_loss": round(stop_loss, 2),
             "take_profit": round(take_profit, 2),
             "risk_reward_ratio": risk_reward_target,
             "indicators_used": indicators_used,
-            "confidence_score": confidence_score
+            "confidence_score": confidence_score,
+            "summary": summary
         }
 
     except Exception as e:
