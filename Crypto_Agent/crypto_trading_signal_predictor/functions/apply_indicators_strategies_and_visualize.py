@@ -13,6 +13,37 @@ class Candle(BaseModel):
     close: float
     volume: float
 
+def compute_confidence(latest, df):
+    # Get recent ATR for volatility normalization
+    atr = (df['high'] - df['low']).rolling(window=14).mean().iloc[-1]
+    close = latest['close']
+    atr_pct = atr / close if close != 0 else 0.01
+    
+    # Features
+    rsi_dev = (latest['RSI_14'] - 50) / 50   # [-1,1]
+    macd_hist_norm = np.tanh(latest['MACD'] - latest['Signal'])  # ~[-1,1]
+    bb_pos = (latest['close'] - latest['BB_Middle']) / (latest['BB_Upper'] - latest['BB_Lower'] + 1e-9)
+    
+    # Weighted score
+    score = (0.8*rsi_dev + 
+             0.9*macd_hist_norm + 
+             0.5*bb_pos + 
+             0.3*latest['SMA_signal'] + 
+             0.3*latest['EMA_signal'] + 
+             0.4*latest['RSI_signal'] + 
+             0.4*latest['MACD_crossover_signal'] + 
+             0.3*latest['BB_signal'])
+    
+    # Sigmoid to probability
+    prob = 1 / (1 + np.exp(-score))
+    
+    # Shrink toward 0.5 if volatility is high
+    shrink = min(0.6, atr_pct / 0.01)  # scale ~1% ATR
+    prob = 0.5 + (prob - 0.5) * (1 - shrink)
+    
+    return float(prob)
+
+
 def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0)
@@ -77,9 +108,7 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
 
     # Strategy 5: Bollinger Bands
     df['BB_signal'] = 0
-    # Buy if price crosses below lower band (from above)
     df.loc[(df['close'] < df['BB_Lower']) & (df['close'].shift(1) >= df['BB_Lower'].shift(1)), 'BB_signal'] = 1
-    # Sell if price crosses above upper band (from below)
     df.loc[(df['close'] > df['BB_Upper']) & (df['close'].shift(1) <= df['BB_Upper'].shift(1)), 'BB_signal'] = -1
 
     # Combine all strategy signals
@@ -95,7 +124,7 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
 
     df['signal_meaning'] = df['combined_signal'].apply(interpret_signal)
 
-    # Alert messages for signal changes
+    # Alerts
     df['previous_signal'] = df['signal_meaning'].shift(1)
     df['alert'] = ''
     for idx, row in df.iterrows():
@@ -105,8 +134,10 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
             elif row['signal_meaning'] == 'Sell':
                 df.at[idx, 'alert'] = f"Sell signal generated at {idx}"
 
-    # Prepare signals over time for output
-    signals_over_time = df[['close', 'SMA_signal', 'EMA_signal', 'RSI_signal', 'MACD_crossover_signal', 'BB_signal', 'combined_signal', 'signal_meaning', 'alert']].dropna().to_dict(orient='index')
+    # Prepare signals over time
+    signals_over_time = df[['close', 'SMA_signal', 'EMA_signal', 'RSI_signal', 
+                            'MACD_crossover_signal', 'BB_signal', 
+                            'combined_signal', 'signal_meaning', 'alert']].dropna().to_dict(orient='index')
 
     latest = df.iloc[-1]
     latest_summary = {
@@ -131,33 +162,40 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
         "alert": latest['alert'],
     }
 
-    # Visualization helper (returns base64 string or shows plot if running locally)
+    # Compute confidence
+    latest_prob = compute_confidence(latest, df)
+    if latest['signal_meaning'] == 'Buy':
+        confidence = latest_prob
+    elif latest['signal_meaning'] == 'Sell':
+        confidence = 1 - latest_prob
+    else:
+        confidence = 1 - abs(latest_prob - 0.5) * 2 
+
+    latest_summary["confidence"] = round(confidence * 100, 2)  # percentage
+
     def plot_indicators_signals(df):
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14,10), sharex=True)
 
-        # Price + Bollinger Bands + Buy/Sell markers
+        # Price with Bollinger Bands + Buy/Sell markers
         ax1.plot(df.index, df['close'], label='Close Price', color='black')
         ax1.plot(df.index, df['BB_Middle'], label='BB Middle', color='blue', linestyle='--')
         ax1.plot(df.index, df['BB_Upper'], label='BB Upper', color='red', linestyle='--')
         ax1.plot(df.index, df['BB_Lower'], label='BB Lower', color='green', linestyle='--')
-
-        # Mark Buy/Sell signals on price chart
         buy_signals = df[df['signal_meaning'] == 'Buy']
         sell_signals = df[df['signal_meaning'] == 'Sell']
         ax1.scatter(buy_signals.index, buy_signals['close'], marker='^', color='green', label='Buy Signal', s=100)
         ax1.scatter(sell_signals.index, sell_signals['close'], marker='v', color='red', label='Sell Signal', s=100)
-
         ax1.set_title('Price with Bollinger Bands and Buy/Sell Signals')
         ax1.legend()
 
-        # RSI plot
+        # RSI
         ax2.plot(df.index, df['RSI_14'], label='RSI (14)', color='purple')
         ax2.axhline(70, color='red', linestyle='--')
         ax2.axhline(30, color='green', linestyle='--')
         ax2.set_title('RSI Indicator')
         ax2.legend()
 
-        # MACD plot
+        # MACD
         ax3.plot(df.index, df['MACD'], label='MACD Line', color='blue')
         ax3.plot(df.index, df['Signal'], label='Signal Line', color='orange')
         ax3.bar(df.index, df['Hist'], label='Histogram', color='gray')
@@ -167,11 +205,10 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
         plt.tight_layout()
         plt.show()
 
-    # Optionally, call plot_indicators_signals(df) here if you want to see plot during run.
-
     return {
         "latest_summary": latest_summary,
         "signals_over_time": signals_over_time,
-        "plot_function": plot_indicators_signals ,
-        "dataframe" : df 
+        "plot_function": plot_indicators_signals,
+        "dataframe": df
     }
+

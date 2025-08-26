@@ -13,7 +13,7 @@ NAME_TO_SYMBOL = {
     # add more as needed
 }
 
-DEFAULT_QUOTE = "USDT"
+DEFAULT_QUOTE = "USD"
 
 def normalize_input(user_input: str) -> str:
     """
@@ -39,13 +39,20 @@ async def ohlcv_tool(input: str):
     pair = normalize_input(input)
     if not pair:
         return "Invalid input format. Use format like 'BTC/USDT' or just 'BTC'."
-    print(f"Fetching predictions for: {pair}")
-    response = await get_coin_details(pair)
+    print(f"Fetching candles for: {pair}")
+    response = await get_coin_details(pair, howmuchcandles=10)
     print("OHLCV Data Retrieved:")
     if response.ohlcv is None:
         print("Error:", response.error)
         return
+    # ensure list type
+    ohlcv_data = response.ohlcv
+    if isinstance(ohlcv_data, dict):  
+        ohlcv_data = [ohlcv_data]  # wrap single dict into list
+    else:
+        ohlcv_data = [candle.model_dump() for candle in ohlcv_data]
+
     return {
         "pair": pair,
-        "ohlcv": [candle.model_dump() for candle in response.ohlcv]  # <-- always a list
-    }
+        "ohlcv": ohlcv_data
+    }   

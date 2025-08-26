@@ -64,6 +64,8 @@ def detect_intent_and_pair(user_input: str):
         intent = "price"
     elif any(word in text for word in ["news", "update", "article", "media"]):
         intent = "news"
+    elif any(word in text for word in ["swing", "analysis"]):
+        intent = "swing_analysis"
     elif trading_pair:
         intent = "price"
     else:
@@ -109,8 +111,7 @@ async def handle_user_message(user_input):
                 any_info_about_any_coin,
                 news_about_crypto,
                 auto_compound_risk_management_tool,
-                swing_trading_tool,
-                ohlcv_tool
+                swing_trading_tool
             ],
             model=model
         )

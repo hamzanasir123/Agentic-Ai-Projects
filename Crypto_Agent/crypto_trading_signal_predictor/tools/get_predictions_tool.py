@@ -1,4 +1,4 @@
-import asyncio
+import re
 from agents import function_tool
 from functions.data_collector_tool import get_coin_details
 from functions.apply_indicators_strategies_and_visualize import apply_indicators_strategies_and_visualize
@@ -15,24 +15,24 @@ NAME_TO_SYMBOL = {
     # add more as needed
 }
 
-DEFAULT_QUOTE = "USDT"
+DEFAULT_QUOTE = "USD"
 
 def normalize_input(user_input: str) -> str:
     """
-    Convert user input like 'ethereum' or 'ETH' to a proper SYMBOL/QUOTE format.
+    Normalize user input into SYMBOL/QUOTE format.
+    Example: "give me prediction on BTC/USD for next 12 hours" -> "BTC/USD"
     """
-    user_input = user_input.strip().lower().replace("-", "").replace(" ", "")
-    if "/" in user_input:
-        base, quote = user_input.split("/")
-        base_sym = NAME_TO_SYMBOL.get(base, base.upper())
-        return f"{base_sym}/{quote.upper()}"
-    # Single token input
-    base_sym = NAME_TO_SYMBOL.get(user_input)
-    if base_sym:
-        return f"{base_sym}/{DEFAULT_QUOTE}"
-    # fallback if unknown
-    return None
+    match = re.search(r"([a-zA-Z]+)[/\- ]?([a-zA-Z]+)?", user_input)
+    if not match:
+        return None
 
+    base = match.group(1).lower()
+    quote = DEFAULT_QUOTE.lower()
+
+    base_sym = NAME_TO_SYMBOL.get(base, base.upper())
+    quote_sym = NAME_TO_SYMBOL.get(quote, quote.upper())
+
+    return f"{base_sym}/{quote_sym}"
 
 
 

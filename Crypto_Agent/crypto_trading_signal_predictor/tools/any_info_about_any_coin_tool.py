@@ -4,7 +4,7 @@ from agents import function_tool
 from dotenv import load_dotenv
 import os
 
-from functions.data_collector_tool import GetCoinDetailsOutput
+from functions.data_collector_tool import CoinDetails
 
 load_dotenv()
 
@@ -63,7 +63,7 @@ async def any_info_about_any_coin(input: str):
 
     coin_id = SYMBOL_TO_ID.get(base_symbol)
     if not coin_id:
-        return GetCoinDetailsOutput(error=f"Unsupported base symbol '{base_symbol}'.")
+        return CoinDetails(error=f"Unsupported base symbol '{base_symbol}'.")
 
     # Fetch current price
     price_url = f"{COIN_GECKO_BASE_URL}/simple/price"
@@ -81,7 +81,7 @@ async def any_info_about_any_coin(input: str):
         data = res.json()
 
         if coin_id not in data:
-            return GetCoinDetailsOutput(error="No price data found from CoinGecko.")
+            return CoinDetails(error="No price data found from CoinGecko.")
 
         coin_data = data[coin_id]
 
@@ -94,6 +94,6 @@ async def any_info_about_any_coin(input: str):
         }
 
     except requests.RequestException as e:
-        return GetCoinDetailsOutput(error=f"Network/API request failed: {str(e)}")
+        return CoinDetails(error=f"Network/API request failed: {str(e)}")
     except Exception as e:
-        return GetCoinDetailsOutput(error=f"Unexpected error: {str(e)}")
+        return CoinDetails(error=f"Unexpected error: {str(e)}")

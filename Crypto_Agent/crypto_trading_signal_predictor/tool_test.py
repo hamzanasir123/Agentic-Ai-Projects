@@ -1,35 +1,23 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from functions.data_collector_tool import get_coin_details
+from tools.get_predictions_tool import get_predictions_tool
 from tools.swing_trading_tool import Candle, swing_trading_tool
 from tools.risk_management_tool import SimpleRiskInput, auto_compound_risk_management_tool
 
 
-async def test_risk_tool():
+async def test_ohlcv_tool():
     # Sample input data
-    capital_usd = 10000.0
-    days = 30
+    input_data = "BTC/USD"
 
     # Call the function
-    result = auto_compound_risk_management_tool(SimpleRiskInput(capital_usd=capital_usd, days=days))
+    result = await get_coin_details(input_data)
 
-    print(f"Symbol: {result.summary.symbol}")
-    print(f"Days: {result.summary.days}")
-    print(f"Capital Start: {result.summary.capital_start}")
-    print(f"Capital End: {result.summary.capital_end}")
-    print(f"Risk per Trade Pct: {result.summary.risk_per_trade_pct}")
-    print(f"Max Daily Loss Pct: {result.summary.max_daily_loss_pct}")
-    print(f"Max Trades Per Day: {result.summary.max_trades_per_day}")
-    print(f"Stop Distance Pct: {result.summary.stop_distance_pct}")
-    print(f"Leverage: {result.summary.leverage}")
-    print(f"Target RR: {result.summary.target_rr}")
-    print(f"Est Win Rate Pct: {result.summary.est_win_rate_pct}")
-    print(f"Expected R per Trade After Costs: {result.summary.expected_R_per_trade_after_costs}")
-    print(f"Projected Edge per Trade USD: {result.summary.projected_edge_per_trade_usd}")
-    print(f"Projected Avg Daily Return USD: {result.summary.projected_avg_daily_return_usd}")
+    print("OHLCV Result:")
+    print(result)
 
 
-
-asyncio.run(test_risk_tool())
+asyncio.run(test_ohlcv_tool())
 
 
 
@@ -39,16 +27,44 @@ asyncio.run(test_risk_tool())
 
 
 
+# async def test_prediction_tool():
+#     # Sample input data
+#     input_data = "BTC/USDT"
+
+#     # Call the function
+#     result = await get_predictions_tool(input_data)
+
+#     print("Predictions Result:")
+#     print(result)
+
+# asyncio.run(test_prediction_tool())
+
+# async def test_risk_tool():
+#     # Sample input data
+#     capital_usd = 10000.0
+#     days = 30
+
+#     # Call the function
+#     result = auto_compound_risk_management_tool(SimpleRiskInput(capital_usd=capital_usd, days=days))
+
+#     print(f"Symbol: {result.summary.symbol}")
+#     print(f"Days: {result.summary.days}")
+#     print(f"Capital Start: {result.summary.capital_start}")
+#     print(f"Capital End: {result.summary.capital_end}")
+#     print(f"Risk per Trade Pct: {result.summary.risk_per_trade_pct}")
+#     print(f"Max Daily Loss Pct: {result.summary.max_daily_loss_pct}")
+#     print(f"Max Trades Per Day: {result.summary.max_trades_per_day}")
+#     print(f"Stop Distance Pct: {result.summary.stop_distance_pct}")
+#     print(f"Leverage: {result.summary.leverage}")
+#     print(f"Target RR: {result.summary.target_rr}")
+#     print(f"Est Win Rate Pct: {result.summary.est_win_rate_pct}")
+#     print(f"Expected R per Trade After Costs: {result.summary.expected_R_per_trade_after_costs}")
+#     print(f"Projected Edge per Trade USD: {result.summary.projected_edge_per_trade_usd}")
+#     print(f"Projected Avg Daily Return USD: {result.summary.projected_avg_daily_return_usd}")
 
 
 
-
-
-
-
-
-
-
+# asyncio.run(test_risk_tool())
 
 
 # async def test_swing_trading_tool():
