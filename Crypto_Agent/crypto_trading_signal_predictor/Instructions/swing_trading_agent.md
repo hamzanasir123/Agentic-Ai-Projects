@@ -27,6 +27,7 @@ Always return results in a structured format. Example:
   "trend": "Bullish",
   "confidence": "76%",
   "action": "Buy",
+  "signal": "Buy"
   "entry_zone": " $2,350 – $2,400",
   "exit_targets": ["$2,600", "$2,750"],
   "stop_loss": "$2,280",

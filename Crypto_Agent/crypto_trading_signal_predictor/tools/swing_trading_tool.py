@@ -5,8 +5,8 @@ import pandas as pd
 import numpy as np
 from agents import function_tool
 from pydantic import BaseModel
-
 from functions.data_collector_tool import get_coin_details
+
 
 # ===========================
 # Helper Functions
@@ -165,9 +165,6 @@ def normalize_ohlcv(ohlcv: List[Any]) -> pd.DataFrame:
 
     raise ValueError("Unsupported OHLCV data format")
 
-## ===========================
-# Swing Trading Signal Tool (Aligned with Agent Instructions)
-# ===========================
 @function_tool
 async def get_swing_trade_tool(
     input: str,
@@ -184,13 +181,14 @@ async def get_swing_trade_tool(
 
     print(f"🔍 Generating swing trading signal for {pair} on {timeframe} timeframe...")
 
-    # ✅ get OHLCV + live price from Binance (via CCXT)
-    response = await get_coin_details(pair, timeframe=timeframe, limit=150)
+    # ✅ get OHLCV + live price
+    response = await get_coin_details(pair, limit=150)
+    print(f"✅ Fetched {len(response.ohlcv) if response.ohlcv else 0} candles for {pair}")
     if response.ohlcv is None:
         return {"pair": pair, "error": response.error}
 
     try:
-        # normalize candles into DataFrame
+        # normalize candles
         df = normalize_ohlcv(response.ohlcv)
         if df.empty or len(df) < 50:
             return {"pair": pair, "error": f"Not enough OHLCV data ({len(df)} candles)"}
@@ -211,51 +209,82 @@ async def get_swing_trade_tool(
 
         # --- Weighted Voting System ---
         buy_score, sell_score = 0, 0
-        indicators_used = []
         trend_bias = "Sideways ➡️"
+        indicator_status = []
 
         # RSI
         if rsi < 30:
-            buy_score += 1; indicators_used.append("RSI Oversold")
+            buy_score += 1
+            indicator_status.append(f"RSI={rsi:.2f} (Oversold ➡️ Bullish)")
         elif rsi > 70:
-            sell_score += 1; indicators_used.append("RSI Overbought")
+            sell_score += 1
+            indicator_status.append(f"RSI={rsi:.2f} (Overbought ➡️ Bearish)")
+        else:
+            indicator_status.append(f"RSI={rsi:.2f} (Neutral)")
 
         # MACD
         if macd_data["macd"] > macd_data["signal"]:
-            buy_score += 1; indicators_used.append("MACD Bullish")
+            buy_score += 1
+            indicator_status.append("MACD Bullish")
         else:
-            sell_score += 1; indicators_used.append("MACD Bearish")
+            sell_score += 1
+            indicator_status.append("MACD Bearish")
 
         # EMA Cross
         if ema_fast > ema_slow:
-            buy_score += 1; indicators_used.append("EMA Bullish"); trend_bias = "Bullish 📈"
+            buy_score += 1
+            trend_bias = "Bullish 📈"
+            indicator_status.append("EMA Bullish (20 > 50)")
         elif ema_fast < ema_slow:
-            sell_score += 1; indicators_used.append("EMA Bearish"); trend_bias = "Bearish 📉"
+            sell_score += 1
+            trend_bias = "Bearish 📉"
+            indicator_status.append("EMA Bearish (20 < 50)")
+        else:
+            indicator_status.append("EMA Neutral (20 ≈ 50)")
 
         # Bollinger Bands
         if last_price <= bb["lower"]:
-            buy_score += 1; indicators_used.append("BB Lower (Rebound)")
+            buy_score += 1
+            indicator_status.append("Bollinger: Price near Lower Band (Rebound Bullish)")
         elif last_price >= bb["upper"]:
-            sell_score += 1; indicators_used.append("BB Upper (Overbought)")
+            sell_score += 1
+            indicator_status.append("Bollinger: Price near Upper Band (Overbought Bearish)")
+        else:
+            indicator_status.append("Bollinger: Price within Bands (Neutral)")
 
         # SuperTrend
         if supertrend["supertrend"]:
-            buy_score += 1; indicators_used.append("SuperTrend Bullish")
+            buy_score += 1
+            indicator_status.append("SuperTrend Bullish")
         else:
-            sell_score += 1; indicators_used.append("SuperTrend Bearish")
+            sell_score += 1
+            indicator_status.append("SuperTrend Bearish")
 
         # Stochastic
         if stoch["k"] < 20 and stoch["d"] < 20:
-            buy_score += 1; indicators_used.append("Stochastic Oversold")
+            buy_score += 1
+            indicator_status.append(f"Stochastic ({stoch['k']:.2f}/{stoch['d']:.2f}) Oversold ➡️ Bullish")
         elif stoch["k"] > 80 and stoch["d"] > 80:
-            sell_score += 1; indicators_used.append("Stochastic Overbought")
+            sell_score += 1
+            indicator_status.append(f"Stochastic ({stoch['k']:.2f}/{stoch['d']:.2f}) Overbought ➡️ Bearish")
+        else:
+            indicator_status.append(f"Stochastic ({stoch['k']:.2f}/{stoch['d']:.2f}) Neutral")
 
-        # ADX trend strength
+        # ADX
         if adx > 25:
             if trend_bias.startswith("Bullish"):
-                buy_score += 1; indicators_used.append("ADX Strong Bullish Trend")
+                buy_score += 1
+                indicator_status.append(f"ADX={adx:.2f} Strong Bullish Trend")
             elif trend_bias.startswith("Bearish"):
-                sell_score += 1; indicators_used.append("ADX Strong Bearish Trend")
+                sell_score += 1
+                indicator_status.append(f"ADX={adx:.2f} Strong Bearish Trend")
+            else:
+                indicator_status.append(f"ADX={adx:.2f} Strong Trend (Direction unclear)")
+        else:
+            indicator_status.append(f"ADX={adx:.2f} Weak Trend")
+
+        # ATR
+        indicator_status.append(f"ATR={atr:.2f} (Volatility measure)")
 
         # --- Final Signal ---
         if buy_score > sell_score:
@@ -268,7 +297,7 @@ async def get_swing_trade_tool(
             action = "Hold"
             signal = "Neutral"
 
-        # --- Risk Management (ATR-based SL & TP) ---
+        # --- Risk Management ---
         entry_price = last_price
         atr_multiplier = 1.5 if "Strong" in signal else 1.0
         rr_multiplier = risk_reward_target if "Strong" in signal else risk_reward_target * 0.75
@@ -279,12 +308,25 @@ async def get_swing_trade_tool(
         elif action == "Sell":
             stop_loss = entry_price + (atr * atr_multiplier)
             exit_targets = [entry_price - (atr * rr_multiplier)]
-        else:  # Neutral → range trade
+        else:
             stop_loss = entry_price - (atr * 1.0)
             exit_targets = [entry_price + (atr * 1.0)]
 
         # --- Confidence Score ---
         confidence = round((max(buy_score, sell_score) / 7) * 100, 2)
+
+        if trend_bias == "Bullish":
+            entry_zone = last_price - atr
+            exit_targets = [last_price + atr, last_price + 2 * atr]
+            stop_loss = last_price - 2 * atr
+        elif trend_bias == "Bearish":
+            entry_zone = last_price + atr
+            exit_targets = [last_price - atr, last_price - 2 * atr]
+            stop_loss = last_price + 2 * atr
+        else:
+            entry_zone = last_price
+            exit_targets = [last_price]
+            stop_loss = last_price
 
         # --- Final Structured Output ---
         return {
@@ -294,10 +336,10 @@ async def get_swing_trade_tool(
             "confidence": f"{confidence}%",
             "action": action,
             "signal": signal,
-            "entry_zone": round(entry_price, 2),
+            "entry_zone": entry_zone,
             "exit_targets": [round(t, 2) for t in exit_targets],
             "stop_loss": round(stop_loss, 2),
-            "reason": ", ".join(indicators_used) if indicators_used else "No clear indicator signals"
+            "reason": ", ".join(indicator_status)
         }
 
     except Exception as e:

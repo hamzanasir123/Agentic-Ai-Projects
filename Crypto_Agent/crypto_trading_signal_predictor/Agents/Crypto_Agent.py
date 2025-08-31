@@ -8,6 +8,7 @@ from tools.any_info_about_any_coin_tool import any_info_about_any_coin
 from tools.news_about_crypto_tool import news_about_crypto
 from tools.risk_management_tool import risk_management_tool
 from Agents.Signal_Prediction_Agent import signal_predictor_agent
+from Agents.Swing_Trading_Agent import swing_trade_agent
 
 
 # --- Load environment variables ---
@@ -96,7 +97,10 @@ crypto_manager_agent = Agent(
         news_about_crypto,
         risk_management_tool
     ],
-    handoffs=[signal_predictor_agent],
+    handoffs=[
+        signal_predictor_agent,
+        swing_trade_agent      
+        ],
     model=None  
 )
 

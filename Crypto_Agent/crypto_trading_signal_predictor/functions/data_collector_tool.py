@@ -31,10 +31,10 @@ exchange = ccxt.binance()
 async def get_coin_details(pair: str, limit: int = 150) -> CoinDetails:
     try:
         # CCXT expects symbols like "BTC/USDT", not "BTC/USD"
-        symbol = pair.replace("USD", "USDT")
+        # symbol = pair.replace("USD", "USDT")
 
         # ✅ fetch hourly OHLCV from Binance
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe="1h", limit=limit)
+        ohlcv = exchange.fetch_ohlcv(pair, timeframe="1h", limit=limit)
 
         # Convert to DataFrame
         df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -53,7 +53,7 @@ async def get_coin_details(pair: str, limit: int = 150) -> CoinDetails:
         ]
 
         # ✅ live price (from ticker)
-        ticker = exchange.fetch_ticker(symbol)
+        ticker = exchange.fetch_ticker(pair)
         price = ticker["last"]
 
         return CoinDetails(ohlcv=candles, price=price)
