@@ -34,13 +34,12 @@ def normalize_input(user_input: str) -> str:
 
 
 
-@function_tool
 async def ohlcv_tool(input: str):
     pair = normalize_input(input)
     if not pair:
         return "Invalid input format. Use format like 'BTC/USDT' or just 'BTC'."
     print(f"Fetching candles for: {pair}")
-    response = await get_coin_details(pair, howmuchcandles=10)
+    response = await get_coin_details(pair)
     print("OHLCV Data Retrieved:")
     if response.ohlcv is None:
         print("Error:", response.error)

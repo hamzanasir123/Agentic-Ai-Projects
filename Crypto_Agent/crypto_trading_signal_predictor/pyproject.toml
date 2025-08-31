@@ -9,6 +9,7 @@ dependencies = [
     "chainlit>=2.6.8",
     "fastapi>=0.116.1",
     "matplotlib>=3.10.5",
+    "mplfinance>=0.12.10b0",
     "numpy>=2.3.2",
     "openai-agents>=0.2.5",
     "pandas>=2.3.1",

@@ -165,42 +165,39 @@ def normalize_ohlcv(ohlcv: List[Any]) -> pd.DataFrame:
 
     raise ValueError("Unsupported OHLCV data format")
 
-# ===========================
-# Swing Trading Signal Tool
+## ===========================
+# Swing Trading Signal Tool (Aligned with Agent Instructions)
 # ===========================
 @function_tool
-async def swing_trading_tool(
-    input: str
+async def get_swing_trade_tool(
+    input: str,
+    timeframe: str = "1d"   # default timeframe is Daily swing analysis
 ) -> Dict[str, Any]:
+    """
+    Generates a structured swing trading signal with entry, exit, SL, and reasoning.
+    """
+
     risk_reward_target: float = 2.0
     pair = normalize_input(input)
     if not pair:
-        return {"error": "Invalid input format. Use format like 'BTC/USD' or just 'BTC'."}
+        return {"error": "Invalid input format. Use 'BTC/USDT' or just 'BTC'."}
 
-    print(f"Generating swing trading signal for {pair}...")
+    print(f"🔍 Generating swing trading signal for {pair} on {timeframe} timeframe...")
 
     # ✅ get OHLCV + live price from Binance (via CCXT)
-    response = await get_coin_details(pair, limit=150)
+    response = await get_coin_details(pair, timeframe=timeframe, limit=150)
     if response.ohlcv is None:
-        print("Error:", response.error)
         return {"pair": pair, "error": response.error}
-
-    ohlcv = response.ohlcv
-    print("OHLCV Data Retrieved:")
-    print("Sample OHLCV record:", ohlcv[0])
 
     try:
         # normalize candles into DataFrame
-        df = normalize_ohlcv(ohlcv)
+        df = normalize_ohlcv(response.ohlcv)
         if df.empty or len(df) < 50:
             return {"pair": pair, "error": f"Not enough OHLCV data ({len(df)} candles)"}
 
         close_prices = df["close"]
-
-        # ✅ last price comes from the last hourly candle
         last_price = close_prices.iloc[-1]
 
-        print(f"✅ Using {len(df)} candles for analysis.")
         # --- Indicators ---
         rsi = calculate_rsi(close_prices)
         macd_data = calculate_macd(close_prices)
@@ -212,181 +209,98 @@ async def swing_trading_tool(
         stoch = calculate_stochastic(df)
         adx = calculate_adx(df)
 
-        # --- Debug Printout ---
-        print("\n=== Indicator Debug Log ===")
-        print(f"Pair: {pair}")
-        print(f"Last Price: {last_price:.2f}")
-        print(f"RSI: {rsi:.2f}")
-        print(f"MACD: {macd_data['macd']:.5f}, Signal: {macd_data['signal']:.5f}")
-        print(f"ATR: {atr:.2f}")
-        print(f"EMA Fast (20): {ema_fast:.2f}, EMA Slow (50): {ema_slow:.2f}")
-        print(f"Bollinger Bands → Upper: {bb['upper']:.2f}, Lower: {bb['lower']:.2f}")
-        print(f"SuperTrend → {'Bullish' if supertrend['supertrend'] else 'Bearish'}")
-        print(f"Stochastic → %K={stoch['k']:.2f}, %D={stoch['d']:.2f}")
-        print(f"ADX → {adx:.2f}")
-        print("==========================\n")
-
-        # --- Signal Logic (Weighted Voting) ---
+        # --- Weighted Voting System ---
         buy_score, sell_score = 0, 0
         indicators_used = []
+        trend_bias = "Sideways ➡️"
 
         # RSI
         if rsi < 30:
-            buy_score += 1
-            indicators_used.append("RSI Oversold")
+            buy_score += 1; indicators_used.append("RSI Oversold")
         elif rsi > 70:
-            sell_score += 1
-            indicators_used.append("RSI Overbought")
+            sell_score += 1; indicators_used.append("RSI Overbought")
 
         # MACD
         if macd_data["macd"] > macd_data["signal"]:
-            buy_score += 1
-            indicators_used.append("MACD Bullish")
-        elif macd_data["macd"] < macd_data["signal"]:
-            sell_score += 1
-            indicators_used.append("MACD Bearish")
+            buy_score += 1; indicators_used.append("MACD Bullish")
+        else:
+            sell_score += 1; indicators_used.append("MACD Bearish")
 
         # EMA Cross
         if ema_fast > ema_slow:
-            trend_bias = "Bullish 📈"
-            buy_score += 1
-            indicators_used.append("EMA Bullish")
+            buy_score += 1; indicators_used.append("EMA Bullish"); trend_bias = "Bullish 📈"
         elif ema_fast < ema_slow:
-            trend_bias = "Bearish 📉"
-            sell_score += 1
-            indicators_used.append("EMA Bearish")
-        else:
-            trend_bias = "Sideways ➡️"
-
+            sell_score += 1; indicators_used.append("EMA Bearish"); trend_bias = "Bearish 📉"
 
         # Bollinger Bands
-        bb = calculate_bollinger_bands(close_prices)
-        if close_prices.iloc[-1] <= bb["lower"]:  # price at/below lower band → possible reversal
-            buy_score += 1
-            indicators_used.append("BB Lower (Rebound)")
-        elif close_prices.iloc[-1] >= bb["upper"]:  # price at/above upper band → overextended
-            sell_score += 1
-            indicators_used.append("BB Upper (Overbought)")
+        if last_price <= bb["lower"]:
+            buy_score += 1; indicators_used.append("BB Lower (Rebound)")
+        elif last_price >= bb["upper"]:
+            sell_score += 1; indicators_used.append("BB Upper (Overbought)")
 
         # SuperTrend
-        supertrend = calculate_supertrend(df)
-        if supertrend["supertrend"]:  # bullish trend
-            buy_score += 1
-            indicators_used.append("SuperTrend Bullish")
-        else:  # bearish trend
-            sell_score += 1
-            indicators_used.append("SuperTrend Bearish")
+        if supertrend["supertrend"]:
+            buy_score += 1; indicators_used.append("SuperTrend Bullish")
+        else:
+            sell_score += 1; indicators_used.append("SuperTrend Bearish")
 
         # Stochastic
-        stoch = calculate_stochastic(df)
-        if stoch["k"] < 20 and stoch["d"] < 20:  # oversold
-            buy_score += 1
-            indicators_used.append("Stochastic Oversold")
-        elif stoch["k"] > 80 and stoch["d"] > 80:  # overbought
-            sell_score += 1
-            indicators_used.append("Stochastic Overbought")
+        if stoch["k"] < 20 and stoch["d"] < 20:
+            buy_score += 1; indicators_used.append("Stochastic Oversold")
+        elif stoch["k"] > 80 and stoch["d"] > 80:
+            sell_score += 1; indicators_used.append("Stochastic Overbought")
 
-        # ADX
-        adx = calculate_adx(df)
-        if adx > 25:  # strong trend confirmation
+        # ADX trend strength
+        if adx > 25:
             if trend_bias.startswith("Bullish"):
-                buy_score += 1
-                indicators_used.append("ADX Strong Trend (Bullish)")
+                buy_score += 1; indicators_used.append("ADX Strong Bullish Trend")
             elif trend_bias.startswith("Bearish"):
-                sell_score += 1
-                indicators_used.append("ADX Strong Trend (Bearish)")
+                sell_score += 1; indicators_used.append("ADX Strong Bearish Trend")
 
-# --- Final Signal with Weak States ---
+        # --- Final Signal ---
         if buy_score > sell_score:
-            if buy_score == 5:
-                signal = "Strong Buy"
-            else:
-                signal = "Weak Buy"
+            action = "Buy"
+            signal = "Strong Buy" if buy_score >= 5 else "Weak Buy"
         elif sell_score > buy_score:
-            if sell_score == 5:
-                signal = "Strong Sell"
-            else:
-                signal = "Weak Sell"
+            action = "Sell"
+            signal = "Strong Sell" if sell_score >= 5 else "Weak Sell"
         else:
+            action = "Hold"
             signal = "Neutral"
 
-        # --- Risk Management ---
+        # --- Risk Management (ATR-based SL & TP) ---
         entry_price = last_price
+        atr_multiplier = 1.5 if "Strong" in signal else 1.0
+        rr_multiplier = risk_reward_target if "Strong" in signal else risk_reward_target * 0.75
 
-        # ATR multipliers based on signal strength
-        if "Strong" in signal:
-            atr_multiplier = 1.5    # wider stop-loss for strong signals
-            rr_multiplier = risk_reward_target  # e.g., 2.0
-        elif "Weak" in signal:
-            atr_multiplier = 0.8    # tighter stop-loss for weak signals
-            rr_multiplier = risk_reward_target * 0.75  # smaller TP target
-        else:
-            atr_multiplier = 1.0    # neutral default
-            rr_multiplier = risk_reward_target * 0.5
-
-        # Stop-loss & take-profit placement
-        if "Buy" in signal:
+        if action == "Buy":
             stop_loss = entry_price - (atr * atr_multiplier)
-            take_profit = entry_price + (atr * rr_multiplier)
-        elif "Sell" in signal:
+            exit_targets = [entry_price + (atr * rr_multiplier)]
+        elif action == "Sell":
             stop_loss = entry_price + (atr * atr_multiplier)
-            take_profit = entry_price - (atr * rr_multiplier)
-        else:  # Neutral → follow overall trend bias
-            if "Bullish" in trend_bias:
-                stop_loss = entry_price - (atr * atr_multiplier)
-                take_profit = entry_price + (atr * rr_multiplier)
-            elif "Bearish" in trend_bias:
-                stop_loss = entry_price + (atr * atr_multiplier)
-                take_profit = entry_price - (atr * rr_multiplier)
-            else:  # Sideways
-                # keep symmetric placement (no clear direction)
-                stop_loss = entry_price - (atr * atr_multiplier)
-                take_profit = entry_price + (atr * rr_multiplier)
+            exit_targets = [entry_price - (atr * rr_multiplier)]
+        else:  # Neutral → range trade
+            stop_loss = entry_price - (atr * 1.0)
+            exit_targets = [entry_price + (atr * 1.0)]
 
-        # --- Confidence Score (as percentage) ---
-        total_indicators = 7
-        confidence_raw = max(buy_score, sell_score) / total_indicators
-        confidence_score = round(confidence_raw * 100)  # convert to %
+        # --- Confidence Score ---
+        confidence = round((max(buy_score, sell_score) / 7) * 100, 2)
 
-        # --- Emoji Mapping ---
-        signal_emojis = {
-            "Strong Buy": "🟢 Strong Buy",
-            "Weak Buy": "🟡 Weak Buy",
-            "Strong Sell": "🔴 Strong Sell",
-            "Weak Sell": "🟠 Weak Sell",
-            "Neutral": "⚪ Neutral"
-        }
-
-        # Add emoji version of the signal
-        signal_with_emoji = signal_emojis.get(signal, signal)
-
-        # --- Build Human-Readable Summary ---
-        summary = (
-            f"📊 Swing Trade Signal for {pair}\n"
-            f"Signal: {signal_with_emoji} (Confidence: {confidence_score}%)\n"
-            f"Overall Trend: {trend_bias}\n"
-            f"Entry: {entry_price:.2f}\n"
-            f"Stop Loss: {stop_loss:.2f}\n"
-            f"Take Profit: {take_profit:.2f}\n"
-            f"Risk-Reward Ratio: {risk_reward_target}\n"
-            f"Indicators Used: {', '.join(indicators_used) if indicators_used else 'None'}"
-        )
-
+        # --- Final Structured Output ---
         return {
             "pair": pair,
+            "timeframe": timeframe,
+            "trend": trend_bias,
+            "confidence": f"{confidence}%",
+            "action": action,
             "signal": signal,
-            "signal_with_emoji": signal_with_emoji,
-            "trend_bias": trend_bias,
-            "entry_price": round(entry_price, 2),
+            "entry_zone": round(entry_price, 2),
+            "exit_targets": [round(t, 2) for t in exit_targets],
             "stop_loss": round(stop_loss, 2),
-            "take_profit": round(take_profit, 2),
-            "risk_reward_ratio": risk_reward_target,
-            "indicators_used": indicators_used,
-            "confidence_score": confidence_score,
-            "summary": summary
+            "reason": ", ".join(indicators_used) if indicators_used else "No clear indicator signals"
         }
 
     except Exception as e:
-        print(f"❌ Error generating signal for {pair}: {e}")
+        print(f"❌ Error generating swing trade for {pair}: {e}")
         traceback.print_exc()
         return {"error": str(e), "pair": pair}

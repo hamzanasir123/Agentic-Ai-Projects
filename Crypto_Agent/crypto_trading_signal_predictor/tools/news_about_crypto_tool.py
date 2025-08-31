@@ -19,7 +19,6 @@ def news_about_crypto(coin: str, kind: str = "news") -> str:
     Returns:
         str: Nicely formatted news output.
     """
-    print(f"Fetching news for coin: {coin.upper()} with kind: {kind}")
     if not CRYPTOPANIC_API_KEY:
         return "❌ API key missing. Please set CRYPTOPANIC_API_KEY in .env"
 
