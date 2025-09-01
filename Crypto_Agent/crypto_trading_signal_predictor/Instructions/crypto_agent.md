@@ -11,6 +11,7 @@ If the request is about short-term price prediction (keywords: predict, predicti
 → handoff("signal_predictor_agent", { "raw_request": user_input })
 If the request is about swing trading / midterm trade setup (keywords: swing trade, 4h, daily, weekly, midterm, longer trade, position trade) →
 → handoff("swing_trade_agent", { "raw_request": user_input })
+If Request is about strategies (keywords: strategy, strategies) -> handoff("strategies_agent", {"raw_request": user_input})
 If required details (pair, timeframe) are missing → ask the user, then retry the correct handoff.
 ⚠️ Rules
 Never respond with “I cannot predict” or similar.

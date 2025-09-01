@@ -4,19 +4,13 @@ import re
 from agents import Agent, RunConfig, Runner,OpenAIChatCompletionsModel
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, InternalServerError
-from tools.any_info_about_any_coin_tool import any_info_about_any_coin
-from tools.news_about_crypto_tool import news_about_crypto
-from tools.risk_management_tool import risk_management_tool
-from Agents.Signal_Prediction_Agent import signal_predictor_agent
-from Agents.Swing_Trading_Agent import swing_trade_agent
-from Agents.Strategies_Agent import strategies_agent
-
+from Strategies.smc_tool import smc_strategy_tool
 
 # --- Load environment variables ---
 load_dotenv()
 
-with open("Instructions/crypto_agent.md", "r") as file:
-    crypto_agent_instructions = file.read()
+with open("Instructions/strategies_agent_instructions.md", "r") as file:
+    strategies_agent_instructions = file.read()
 
 # --- Gemini API Keys ---
 GEMINI_KEYS = [
@@ -28,6 +22,8 @@ current_key_index = 0
 
 if not GEMINI_KEYS or GEMINI_KEYS == [""]:
     raise ValueError("No Gemini API keys found in .env file.")
+
+
 
 # --- Coin Map ---
 coin_map = {
@@ -82,6 +78,8 @@ def detect_intent_and_pair(user_input: str):
         intent = "swing_analysis"
     elif any(word in text for word in ["risk", "management", "stoploss", "capital"]):
         intent = "risk_management"
+    elif any(word in text for word in ["smc", "smart money", "strategy" , "strategies" , "concepts", "liquidity", "order block", "fvg", "fair value gap", "choc", "change of character", "bos", "break of structure"]):
+        intent = "smc_strategy"
     elif trading_pair:
         intent = "price"
     else:
@@ -89,22 +87,16 @@ def detect_intent_and_pair(user_input: str):
 
     return intent, trading_pair
 
-# --- Create the agent globally ---
-crypto_manager_agent = Agent(
-    name="Crypto Manager Agent",
-    instructions=crypto_agent_instructions,
+
+strategies_agent = Agent(
+    name="Strategies Agent",
+    instructions=strategies_agent_instructions,
     tools=[
-        any_info_about_any_coin,
-        news_about_crypto,
-        risk_management_tool
+        smc_strategy_tool
     ],
-    handoffs=[
-        signal_predictor_agent,
-        swing_trade_agent,
-        strategies_agent
-        ],
     model=None  
 )
+
 
 async def run_agent(conversation_text, intent, pair):
     global current_key_index
@@ -124,11 +116,11 @@ async def run_agent(conversation_text, intent, pair):
         config = RunConfig(model=model, model_provider=external_client, tracing_disabled=True)
 
         # ✅ inject model at runtime
-        crypto_manager_agent.model = model
+        strategies_agent.model = model
 
         try:
             result = await Runner.run(
-                starting_agent=crypto_manager_agent,
+                starting_agent=strategies_agent,
                 input=f"{conversation_text}\nIntent: {intent}\nPair: {pair}",
                 run_config=config
             )
