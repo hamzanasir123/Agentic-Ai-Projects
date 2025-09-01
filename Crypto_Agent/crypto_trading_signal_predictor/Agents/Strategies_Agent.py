@@ -5,6 +5,7 @@ from agents import Agent, RunConfig, Runner,OpenAIChatCompletionsModel
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, InternalServerError
 from Strategies.smc_tool import smc_strategy_tool
+from Strategies.ict_tool import ict_strategy_tool
 
 # --- Load environment variables ---
 load_dotenv()
@@ -92,7 +93,8 @@ strategies_agent = Agent(
     name="Strategies Agent",
     instructions=strategies_agent_instructions,
     tools=[
-        smc_strategy_tool
+        smc_strategy_tool,
+        ict_strategy_tool
     ],
     model=None  
 )

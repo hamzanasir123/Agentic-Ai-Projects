@@ -15,12 +15,12 @@ NAME_TO_SYMBOL = {
     # add more as needed
 }
 
-DEFAULT_QUOTE = "USD"
+DEFAULT_QUOTE = "USDT"
 
 def normalize_input(user_input: str) -> str:
     """
     Normalize user input into SYMBOL/QUOTE format.
-    Example: "give me prediction on BTC/USD for next 12 hours" -> "BTC/USD"
+    Example: "give me prediction on BTC/USDT for next 12 hours" -> "BTC/USDT"
     """
     match = re.search(r"([a-zA-Z]+)[/\- ]?([a-zA-Z]+)?", user_input)
     if not match:

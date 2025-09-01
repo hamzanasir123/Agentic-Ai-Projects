@@ -60,17 +60,21 @@ def calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float =
     upper_band = hl2 + (multiplier * atr)
     lower_band = hl2 - (multiplier * atr)
 
-    supertrend = [True] * len(df)  # True = Bullish, False = Bearish
-    final_upper_band = [0] * len(df)
-    final_lower_band = [0] * len(df)
+    final_upper_band = pd.Series(index=df.index, dtype=float)
+    final_lower_band = pd.Series(index=df.index, dtype=float)
+    supertrend = pd.Series(index=df.index, dtype=bool)
+
+    final_upper_band.iloc[0] = upper_band.iloc[0]
+    final_lower_band.iloc[0] = lower_band.iloc[0]
+    supertrend.iloc[0] = True
 
     for i in range(1, len(df)):
-        final_upper_band[i] = min(upper_band.iloc[i], final_upper_band[i-1]) if df['close'].iloc[i-1] > final_upper_band[i-1] else upper_band.iloc[i]
-        final_lower_band[i] = max(lower_band.iloc[i], final_lower_band[i-1]) if df['close'].iloc[i-1] < final_lower_band[i-1] else lower_band.iloc[i]
+        final_upper_band.iloc[i] = min(upper_band.iloc[i], final_upper_band.iloc[i-1]) if df['close'].iloc[i-1] > final_upper_band.iloc[i-1] else upper_band.iloc[i]
+        final_lower_band.iloc[i] = max(lower_band.iloc[i], final_lower_band.iloc[i-1]) if df['close'].iloc[i-1] < final_lower_band.iloc[i-1] else lower_band.iloc[i]
+        supertrend.iloc[i] = df['close'].iloc[i] > final_upper_band.iloc[i]
 
-        supertrend[i] = True if df['close'].iloc[i] > final_upper_band[i] else False
+    return {"supertrend": bool(supertrend.iloc[-1]), "upper_band": float(final_upper_band.iloc[-1]), "lower_band": float(final_lower_band.iloc[-1])}
 
-    return {"supertrend": supertrend[-1], "upper_band": final_upper_band[-1], "lower_band": final_lower_band[-1]}
 
 def calculate_stochastic(df: pd.DataFrame, period: int = 14, smooth_k: int = 3, smooth_d: int = 3):
     low_min = df['low'].rolling(window=period).min()
@@ -233,11 +237,11 @@ async def get_swing_trade_tool(
         # EMA Cross
         if ema_fast > ema_slow:
             buy_score += 1
-            trend_bias = "Bullish 📈"
+            trend_bias = "Bullish"
             indicator_status.append("EMA Bullish (20 > 50)")
         elif ema_fast < ema_slow:
             sell_score += 1
-            trend_bias = "Bearish 📉"
+            trend_bias = "Bearish"
             indicator_status.append("EMA Bearish (20 < 50)")
         else:
             indicator_status.append("EMA Neutral (20 ≈ 50)")
@@ -298,10 +302,12 @@ async def get_swing_trade_tool(
             signal = "Neutral"
 
         # --- Risk Management ---
+        # --- Risk Management (improved) ---
         entry_price = last_price
         atr_multiplier = 1.5 if "Strong" in signal else 1.0
         rr_multiplier = risk_reward_target if "Strong" in signal else risk_reward_target * 0.75
 
+        # Basic targets based on action (fallback)
         if action == "Buy":
             stop_loss = entry_price - (atr * atr_multiplier)
             exit_targets = [entry_price + (atr * rr_multiplier)]
@@ -312,21 +318,23 @@ async def get_swing_trade_tool(
             stop_loss = entry_price - (atr * 1.0)
             exit_targets = [entry_price + (atr * 1.0)]
 
+
         # --- Confidence Score ---
         confidence = round((max(buy_score, sell_score) / 7) * 100, 2)
 
-        if trend_bias == "Bullish":
-            entry_zone = last_price - atr
-            exit_targets = [last_price + atr, last_price + 2 * atr]
-            stop_loss = last_price - 2 * atr
-        elif trend_bias == "Bearish":
-            entry_zone = last_price + atr
-            exit_targets = [last_price - atr, last_price - 2 * atr]
-            stop_loss = last_price + 2 * atr
+        if trend_bias.startswith("Bullish"):
+            entry_zone = round(last_price - atr, 2)
+            exit_targets = [round(last_price + atr, 2), round(last_price + 2 * atr, 2)]
+            stop_loss = round(last_price - 2 * atr, 2)
+        elif trend_bias.startswith("Bearish"):
+            entry_zone = round(last_price + atr, 2)
+            exit_targets = [round(last_price - atr, 2), round(last_price - 2 * atr, 2)]
+            stop_loss = round(last_price + 2 * atr, 2)
         else:
-            entry_zone = last_price
-            exit_targets = [last_price]
-            stop_loss = last_price
+            entry_zone = round(last_price, 2)
+            # For neutral/sideways, give a small band or conservative targets
+            exit_targets = [round(last_price + 0.5 * atr, 2)]
+            stop_loss = round(last_price - 0.5 * atr, 2)
 
         # --- Final Structured Output ---
         return {

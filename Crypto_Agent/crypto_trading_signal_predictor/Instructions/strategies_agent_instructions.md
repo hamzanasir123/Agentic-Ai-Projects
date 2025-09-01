@@ -20,6 +20,7 @@ Your role is **analysis and strategy application**.
    }
 Choose the correct tool based on user request.
 If the user or Crypto Agent requests SMC (Smart Money Concepts) → use the smc_tool.
+If the user or Crypto Agent requests ICT (Inner Circle Trader) → use the ict_tool.
 In future, you may have other tools (EMA strategy, RSI strategy, etc.).
 Call the tool with provided input.
 Example:

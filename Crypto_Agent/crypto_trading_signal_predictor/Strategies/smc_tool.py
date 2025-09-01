@@ -342,7 +342,7 @@ async def smc_strategy_tool(input: str, timeframe: str):
     if not pair:
         return {"error": "Invalid input format. Use 'BTC/USDT' or just 'BTC'."}
 
-    response = await get_coin_details(pair, limit=3500)
+    response = await get_coin_details(pair, limit=1000)
     print(f"✅ Fetched {len(response.ohlcv) if response.ohlcv else 0} candles for {pair}")
     if response.ohlcv is None:
         return {"pair": pair, "error": response.error}
