@@ -79,8 +79,8 @@ def detect_intent_and_pair(user_input: str):
         intent = "swing_analysis"
     elif any(word in text for word in ["risk", "management", "stoploss", "capital"]):
         intent = "risk_management"
-    elif any(word in text for word in ["smc", "smart money", "strategy" , "strategies" , "concepts", "liquidity", "order block", "fvg", "fair value gap", "choc", "change of character", "bos", "break of structure"]):
-        intent = "smc_strategy"
+    elif any(word in text for word in ["smc", "smart money","ict", "strategy" , "strategies" , "concepts", "liquidity", "order block", "fvg", "fair value gap", "choc", "change of character", "bos", "break of structure"]):
+        intent = "strategy"
     elif trading_pair:
         intent = "price"
     else:
