@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.signal import argrelextrema
 
 class Candle(BaseModel):
     timestamp: datetime
@@ -13,37 +14,114 @@ class Candle(BaseModel):
     close: float
     volume: float
 
+# -------------------------------
+# Utility Functions
+# -------------------------------
 def compute_confidence(latest, df):
-    # Get recent ATR for volatility normalization
     atr = (df['high'] - df['low']).rolling(window=14).mean().iloc[-1]
     close = latest['close']
     atr_pct = atr / close if close != 0 else 0.01
-    
-    # Features
-    rsi_dev = (latest['RSI_14'] - 50) / 50   # [-1,1]
-    macd_hist_norm = np.tanh(latest['MACD'] - latest['Signal'])  # ~[-1,1]
+
+    rsi_dev = (latest['RSI_14'] - 50) / 50
+    macd_hist_norm = np.tanh(latest['MACD'] - latest['Signal'])
     bb_pos = (latest['close'] - latest['BB_Middle']) / (latest['BB_Upper'] - latest['BB_Lower'] + 1e-9)
-    
-    # Weighted score
-    score = (0.8*rsi_dev + 
-             0.9*macd_hist_norm + 
-             0.5*bb_pos + 
-             0.3*latest['SMA_signal'] + 
-             0.3*latest['EMA_signal'] + 
-             0.4*latest['RSI_signal'] + 
-             0.4*latest['MACD_crossover_signal'] + 
-             0.3*latest['BB_signal'])
-    
-    # Sigmoid to probability
+
+    score = (
+        0.8 * rsi_dev +
+        0.9 * macd_hist_norm +
+        0.5 * bb_pos +
+        0.3 * latest['SMA_signal'] +
+        0.3 * latest['EMA_signal'] +
+        0.4 * latest['RSI_signal'] +
+        0.4 * latest['MACD_crossover_signal'] +
+        0.3 * latest['BB_signal'] +
+        0.4 * latest['RSI_Divergence'] +
+        0.4 * latest['RSI_Hidden_Div'] +
+        0.3 * latest['Volume_Divergence']
+    )
+
     prob = 1 / (1 + np.exp(-score))
-    
-    # Shrink toward 0.5 if volatility is high
-    shrink = min(0.6, atr_pct / 0.01)  # scale ~1% ATR
+    shrink = min(0.6, atr_pct / 0.05)
     prob = 0.5 + (prob - 0.5) * (1 - shrink)
-    
     return float(prob)
 
+def find_local_extrema(series: pd.Series, order: int = 5):
+    local_max = argrelextrema(series.values, np.greater, order=order)[0]
+    local_min = argrelextrema(series.values, np.less, order=order)[0]
+    return local_max, local_min
 
+def detect_rsi_divergence(df: pd.DataFrame, order: int = 5):
+    highs, lows = find_local_extrema(df['close'], order)
+    rsi_highs, rsi_lows = find_local_extrema(df['RSI_14'], order)
+
+    df['RSI_Divergence'] = 0
+
+    for i in highs:
+        prev_i = i - order
+        if prev_i < 0:
+            continue
+        nearest_rsi_high = min(rsi_highs, key=lambda x: abs(x - i), default=None)
+        if nearest_rsi_high and abs(nearest_rsi_high - i) <= order:
+            if df['close'].iloc[i] > df['close'].iloc[prev_i] and df['RSI_14'].iloc[i] < df['RSI_14'].iloc[prev_i]:
+                df.at[df.index[i], 'RSI_Divergence'] = -1
+
+    for i in lows:
+        prev_i = i - order
+        if prev_i < 0:
+            continue
+        if i in rsi_lows:
+            if df['close'].iloc[i] < df['close'].iloc[prev_i] and df['RSI_14'].iloc[i] > df['RSI_14'].iloc[prev_i]:
+                df.at[df.index[i], 'RSI_Divergence'] = 1
+
+    return df
+
+def detect_rsi_hidden_divergence(df: pd.DataFrame, order: int = 5):
+    highs, lows = find_local_extrema(df['close'], order)
+    rsi_highs, rsi_lows = find_local_extrema(df['RSI_14'], order)
+
+    df['RSI_Hidden_Div'] = 0
+
+    for i in lows:
+        prev_i = i - order
+        if prev_i < 0:
+            continue
+        if i in rsi_lows:
+            if df['close'].iloc[i] > df['close'].iloc[prev_i] and df['RSI_14'].iloc[i] < df['RSI_14'].iloc[prev_i]:
+                df.at[df.index[i], 'RSI_Hidden_Div'] = 1
+
+    for i in highs:
+        prev_i = i - order
+        if prev_i < 0:
+            continue
+        if i in rsi_highs:
+            if df['close'].iloc[i] < df['close'].iloc[prev_i] and df['RSI_14'].iloc[i] > df['RSI_14'].iloc[prev_i]:
+                df.at[df.index[i], 'RSI_Hidden_Div'] = -1
+
+    return df
+
+def detect_volume_divergence(df: pd.DataFrame, order: int = 5):
+    highs, lows = find_local_extrema(df['close'], order)
+    df['Volume_Divergence'] = 0
+
+    for i in highs:
+        prev_i = i - order
+        if prev_i < 0:
+            continue
+        if df['close'].iloc[i] > df['close'].iloc[prev_i] and df['volume'].iloc[i] < df['volume'].iloc[prev_i]:
+            df.at[df.index[i], 'Volume_Divergence'] = -1
+
+    for i in lows:
+        prev_i = i - order
+        if prev_i < 0:
+            continue
+        if df['close'].iloc[i] < df['close'].iloc[prev_i] and df['volume'].iloc[i] > df['volume'].iloc[prev_i]:
+            df.at[df.index[i], 'Volume_Divergence'] = 1
+
+    return df
+
+# -------------------------------
+# Indicators
+# -------------------------------
 def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0)
@@ -52,6 +130,7 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.rolling(window=period).mean()
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.fillna(100)
     return rsi
 
 def calculate_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
@@ -69,6 +148,9 @@ def calculate_bollinger_bands(series: pd.Series, window: int = 20, num_std: floa
     lower_band = sma - (std * num_std)
     return sma, upper_band, lower_band
 
+# -------------------------------
+# Main Function
+# -------------------------------
 def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, Any]:
     df = pd.DataFrame([c.dict() for c in ohlcv])
     df.set_index('timestamp', inplace=True)
@@ -83,48 +165,40 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
     df = pd.concat([df, macd_df], axis=1)
     df['BB_Middle'], df['BB_Upper'], df['BB_Lower'] = calculate_bollinger_bands(df['close'])
 
-    # Strategy 1: SMA crossover
-    df['SMA_signal'] = 0
-    df.loc[df['SMA_5'] > df['SMA_10'], 'SMA_signal'] = 1
-    df.loc[df['SMA_5'] < df['SMA_10'], 'SMA_signal'] = -1
+    # Divergences
+    df = detect_rsi_divergence(df, order=5)
+    df = detect_rsi_hidden_divergence(df, order=5)
+    df = detect_volume_divergence(df, order=5)
 
-    # Strategy 2: EMA crossover
-    df['EMA_signal'] = 0
-    df.loc[df['EMA_5'] > df['EMA_10'], 'EMA_signal'] = 1
-    df.loc[df['EMA_5'] < df['EMA_10'], 'EMA_signal'] = -1
-
-    # Strategy 3: RSI strategy
+    # Strategies
+    df['SMA_signal'] = np.where(df['SMA_5'] > df['SMA_10'], 1, -1)
+    df['EMA_signal'] = np.where(df['EMA_5'] > df['EMA_10'], 1, -1)
     df['RSI_signal'] = 0
-    df.loc[df['RSI_14'] < 30, 'RSI_signal'] = 1    # Oversold -> Buy
-    df.loc[df['RSI_14'] > 70, 'RSI_signal'] = -1   # Overbought -> Sell
+    df.loc[df['RSI_14'] < 30, 'RSI_signal'] = 1
+    df.loc[df['RSI_14'] > 70, 'RSI_signal'] = -1
 
-    # Strategy 4: MACD crossover
-    df['MACD_signal'] = 0
     df['MACD_signal'] = np.where(df['MACD'] > df['Signal'], 1, -1)
     df['MACD_cross'] = df['MACD_signal'].diff()
-    df['MACD_crossover_signal'] = 0
-    df.loc[df['MACD_cross'] == 2, 'MACD_crossover_signal'] = 1
-    df.loc[df['MACD_cross'] == -2, 'MACD_crossover_signal'] = -1
+    df['MACD_crossover_signal'] = np.where(df['MACD_cross'] == 2, 1, np.where(df['MACD_cross'] == -2, -1, 0))
 
-    # Strategy 5: Bollinger Bands
     df['BB_signal'] = 0
-    df.loc[(df['close'] < df['BB_Lower']) & (df['close'].shift(1) >= df['BB_Lower'].shift(1)), 'BB_signal'] = 1
-    df.loc[(df['close'] > df['BB_Upper']) & (df['close'].shift(1) <= df['BB_Upper'].shift(1)), 'BB_signal'] = -1
+    df.loc[df['close'] < df['BB_Lower'], 'BB_signal'] = 1
+    df.loc[df['close'] > df['BB_Upper'], 'BB_signal'] = -1
 
-    # Combine all strategy signals
-    df['combined_signal'] = df['SMA_signal'] + df['EMA_signal'] + df['RSI_signal'] + df['MACD_crossover_signal'] + df['BB_signal']
+    # Combine signals including divergences
+    df['combined_signal'] = (
+        0.3 * df['SMA_signal'] +
+        0.3 * df['EMA_signal'] +
+        0.4 * df['RSI_signal'] +
+        0.5 * df['MACD_crossover_signal'] +
+        0.3 * df['BB_signal'] +
+        0.4 * df['RSI_Divergence'] +
+        0.4 * df['RSI_Hidden_Div'] +
+        0.3 * df['Volume_Divergence']
+    ).round()
 
-    def interpret_signal(x):
-        if x > 0:
-            return 'Buy'
-        elif x < 0:
-            return 'Sell'
-        else:
-            return 'Hold'
+    df['signal_meaning'] = df['combined_signal'].apply(lambda x: 'Buy' if x > 0 else ('Sell' if x < 0 else 'Hold'))
 
-    df['signal_meaning'] = df['combined_signal'].apply(interpret_signal)
-
-    # Alerts
     df['previous_signal'] = df['signal_meaning'].shift(1)
     df['alert'] = ''
     for idx, row in df.iterrows():
@@ -134,10 +208,8 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
             elif row['signal_meaning'] == 'Sell':
                 df.at[idx, 'alert'] = f"Sell signal generated at {idx}"
 
-    # Prepare signals over time
-    signals_over_time = df[['close', 'SMA_signal', 'EMA_signal', 'RSI_signal', 
-                            'MACD_crossover_signal', 'BB_signal', 
-                            'combined_signal', 'signal_meaning', 'alert']].dropna().to_dict(orient='index')
+    signals_over_time = df[['close','SMA_signal','EMA_signal','RSI_signal','MACD_crossover_signal','BB_signal',
+                            'RSI_Divergence','RSI_Hidden_Div','Volume_Divergence','combined_signal','signal_meaning','alert']].dropna().to_dict(orient='index')
 
     latest = df.iloc[-1]
     latest_summary = {
@@ -157,26 +229,26 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
         "RSI_signal": latest['RSI_signal'],
         "MACD_crossover_signal": latest['MACD_crossover_signal'],
         "BB_signal": latest['BB_signal'],
+        "RSI_Divergence": latest['RSI_Divergence'],
+        "RSI_Hidden_Div": latest['RSI_Hidden_Div'],
+        "Volume_Divergence": latest['Volume_Divergence'],
         "combined_signal": latest['combined_signal'],
         "signal_meaning": latest['signal_meaning'],
         "alert": latest['alert'],
     }
 
-    # Compute confidence
     latest_prob = compute_confidence(latest, df)
     if latest['signal_meaning'] == 'Buy':
         confidence = latest_prob
     elif latest['signal_meaning'] == 'Sell':
         confidence = 1 - latest_prob
     else:
-        confidence = 1 - abs(latest_prob - 0.5) * 2 
-
-    latest_summary["confidence"] = round(confidence * 100, 2)  # percentage
+        confidence = 1 - abs(latest_prob - 0.5) * 2
+    latest_summary["confidence"] = round(confidence * 100, 2)
 
     def plot_indicators_signals(df):
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14,10), sharex=True)
 
-        # Price with Bollinger Bands + Buy/Sell markers
         ax1.plot(df.index, df['close'], label='Close Price', color='black')
         ax1.plot(df.index, df['BB_Middle'], label='BB Middle', color='blue', linestyle='--')
         ax1.plot(df.index, df['BB_Upper'], label='BB Upper', color='red', linestyle='--')
@@ -188,14 +260,12 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
         ax1.set_title('Price with Bollinger Bands and Buy/Sell Signals')
         ax1.legend()
 
-        # RSI
         ax2.plot(df.index, df['RSI_14'], label='RSI (14)', color='purple')
         ax2.axhline(70, color='red', linestyle='--')
         ax2.axhline(30, color='green', linestyle='--')
         ax2.set_title('RSI Indicator')
         ax2.legend()
 
-        # MACD
         ax3.plot(df.index, df['MACD'], label='MACD Line', color='blue')
         ax3.plot(df.index, df['Signal'], label='Signal Line', color='orange')
         ax3.bar(df.index, df['Hist'], label='Histogram', color='gray')
@@ -211,4 +281,3 @@ def apply_indicators_strategies_and_visualize(ohlcv: List[Candle]) -> Dict[str, 
         "plot_function": plot_indicators_signals,
         "dataframe": df
     }
-

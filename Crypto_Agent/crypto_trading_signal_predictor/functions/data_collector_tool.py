@@ -1,10 +1,10 @@
-from typing import List, Optional
+import asyncio
+from typing import Dict, List, Optional, Tuple
 import ccxt
 import pandas as pd
+import time 
 from datetime import datetime
 from pydantic import BaseModel
-
-
 
 class Candle(BaseModel):
     timestamp: datetime
@@ -25,16 +25,46 @@ class CoinDetails(BaseModel):
         extra = 'forbid'
 
 
-exchange = ccxt.binance()
+# USDT-M Futures
+exchange = ccxt.binance({
+    "options": {
+        "defaultType": "future"  # 👈 key part
+    }
+})
+
+# Cache storage: {pair: (timestamp, CoinDetails)}
+_cache: Dict[str, Tuple[float, CoinDetails]] = {}
+# Lock storage: {pair: asyncio.Lock()}
+_locks: Dict[str, asyncio.Lock] = {}
+
+CACHE_TTL = 900  # seconds (adjust as needed)
 
 
-async def get_coin_details(pair: str, limit: int = 150) -> CoinDetails:
+async def get_coin_details(pair: str, limit: int = 250) -> CoinDetails:
+    now = time.time()
+
+    # ✅ If cached and still fresh, return immediately
+    if pair in _cache:
+        ts, cached_data = _cache[pair]
+        if now - ts < CACHE_TTL:
+            print(f"{pair} in cached_data with time left.")
+            return cached_data
+
+    # ✅ Create lock for this pair if missing
+    if pair not in _locks:
+        print(f"{pair} Locked.")
+        _locks[pair] = asyncio.Lock()
+
+    async with _locks[pair]:
+        # 🔄 Double-check cache inside lock (maybe another agent just updated it)
+        if pair in _cache:
+            ts, cached_data = _cache[pair]
+            if now - ts < CACHE_TTL:
+                return cached_data
     try:
-        # CCXT expects symbols like "BTC/USDT", not "BTC/USD"
-        # symbol = pair.replace("USD", "USDT")
-
         # ✅ fetch hourly OHLCV from Binance
-        ohlcv = exchange.fetch_ohlcv(pair, timeframe="1h", limit=limit)
+        ohlcv = exchange.fetch_ohlcv(pair, timeframe="5m", limit=limit)
+        print(f"{pair} is not in cached_data.")
 
         # Convert to DataFrame
         df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -56,7 +86,12 @@ async def get_coin_details(pair: str, limit: int = 150) -> CoinDetails:
         ticker = exchange.fetch_ticker(pair)
         price = ticker["last"]
 
-        return CoinDetails(ohlcv=candles, price=price)
+        coin_details = CoinDetails(ohlcv=candles, price=price)
+
+        # ✅ Update cache
+        _cache[pair] = (time.time(), coin_details)
+
+        return coin_details
 
     except Exception as e:
         return CoinDetails(ohlcv=None, price=None, error=str(e))
