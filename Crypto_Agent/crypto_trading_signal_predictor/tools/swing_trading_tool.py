@@ -75,7 +75,6 @@ def calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float =
 
     return {"supertrend": bool(supertrend.iloc[-1]), "upper_band": float(final_upper_band.iloc[-1]), "lower_band": float(final_lower_band.iloc[-1])}
 
-
 def calculate_stochastic(df: pd.DataFrame, period: int = 14, smooth_k: int = 3, smooth_d: int = 3):
     low_min = df['low'].rolling(window=period).min()
     high_max = df['high'].rolling(window=period).max()
