@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: crypto-guide-agent
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: chainlit run main.py -p 8000 --host 0.0.0.0
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.13
