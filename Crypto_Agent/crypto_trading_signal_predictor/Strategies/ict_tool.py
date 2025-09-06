@@ -275,7 +275,7 @@ async def ict_strategy_tool(input:str, timeframe:str):
 
     try:
         dfs = normalize_ohlcv(response.ohlcv)
-        if dfs.empty or len(dfs) < 500:
+        if dfs.empty or len(dfs) < 250:
             return {"pair": pair, "error": f"Not enough OHLCV data ({len(dfs)} candles)"}
 
         df = pd.DataFrame(dfs)

@@ -349,13 +349,33 @@ async def smc_strategy_tool(input: str, timeframe: str):
 
     try:
         df = normalize_ohlcv(response.ohlcv)
-        if df.empty or len(df) < 200:
+        if df.empty or len(df) < 250:
             return {"pair": pair, "error": f"Not enough OHLCV data ({len(df)} candles)"}
 
         out = smc_signals(df)
 
         # current market price = last close
         current_price = float(out['close'].iloc[-1])
+
+        # === Extra annotations (for consistency with ICT) ===
+        last_bos = out['bos'].dropna().iloc[-1] if out['bos'].dropna().any() else None
+        last_choch = out['choch'].dropna().iloc[-1] if out['choch'].dropna().any() else None
+        trend = out['trend_guess'].dropna().iloc[-1] if out['trend_guess'].dropna().any() else "Range"
+
+        liquidity_levels = [
+            {"type": "buy_side", "price": float(out['low'].tail(20).min())},   # recent swing low
+            {"type": "sell_side", "price": float(out['high'].tail(20).max())}  # recent swing high
+        ]
+
+        extra_annotations = {
+            "last_price": f"{current_price:.2f}",
+            "liquidity_levels": liquidity_levels,
+            "market_structure": {
+                "trend": trend,
+                "last_bos": last_bos,
+                "last_choch": last_choch
+            }
+        }
 
         # collect valid signals
         signals = []
@@ -378,8 +398,12 @@ async def smc_strategy_tool(input: str, timeframe: str):
         # if no signals at all
         if not signals:
             return {
-                "strategy": "SMC", "symbol": pair, "timeframe": timeframe,
-                "signal": None, "message": "No valid SMC signal detected."
+                "strategy": "SMC",
+                "symbol": pair,
+                "timeframe": timeframe,
+                "signal": None,
+                "message": f"No valid SMC signal detected. The market is currently in a '{trend}' trend.",
+                "extra_annotations": extra_annotations
             }
 
         # === Filter: Only take the most recent signal ===
@@ -392,7 +416,8 @@ async def smc_strategy_tool(input: str, timeframe: str):
                 "strategy": "SMC", "symbol": pair, "timeframe": timeframe,
                 "signal": None,
                 "message": f"Last detected signal ({last_signal['side']} at {last_signal['entry']}) "
-                           f"is too far from current price ({current_price}). Ignored."
+                           f"is too far from current price ({current_price}). Ignored.",
+                "extra_annotations": extra_annotations
             }
 
         # === TTL filter: signal must be recent (within N candles) ===
@@ -401,7 +426,8 @@ async def smc_strategy_tool(input: str, timeframe: str):
             return {
                 "strategy": "SMC", "symbol": pair, "timeframe": timeframe,
                 "signal": None,
-                "message": f"Last detected signal is older than {ttl_candles} candles. Ignored."
+                "message": f"Last detected signal is older than {ttl_candles} candles. Ignored.",
+                "extra_annotations": extra_annotations
             }
 
         # ✅ return a fresh, valid signal
@@ -416,8 +442,8 @@ async def smc_strategy_tool(input: str, timeframe: str):
                 "tp": last_signal["tp"],
                 "reason": last_signal["reason"]
             },
-            "current_price": current_price,
-            "message": "Fresh SMC signal detected."
+            "message": "Fresh SMC signal detected.",
+            "extra_annotations": extra_annotations
         }
 
     except Exception as e:

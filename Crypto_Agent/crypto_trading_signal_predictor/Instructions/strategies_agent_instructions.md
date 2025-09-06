@@ -35,15 +35,23 @@ Example output:
 {
   "strategy": "SMC",
   "symbol": "BTC/USDT",
-  "timeframe": "15m",
-  "signal": {
-    "side": "buy",
-    "entry": 67345.2,
-    "sl": 67110.5,
-    "tp": 67800.0,
-    "reason": "SMC: CHoCH/BOS up + liquidity sweep + discount + OB/FVG"
+  "timeframe": "1h",
+  "signal": null,
+  "message": "No valid SMC signal detected. The market is currently in a 'Range' trend.",
+  "extra_annotations": {
+    "last_price": "112531.40",
+    "liquidity_levels": [
+      { "type": "buy_side", "price": "112235.70" },
+      { "type": "sell_side", "price": "112333.50" }
+    ],
+    "market_structure": {
+      "trend": "Range",
+      "last_bos": null,
+      "last_choch": null
+    }
   }
 }
+
 And Give A Detailed Reason as Like User Dont Know About SHoCH/BOS or OB/FVG So Give A Detailed Reason That Why you Are Taking This Decedion
 
 Rules
