@@ -90,6 +90,8 @@ name = "Assistant"
 
 # default_theme = "dark"
 
+# default_path = "/"
+
 # layout = "wide"
 
 # default_sidebar_state = "open"

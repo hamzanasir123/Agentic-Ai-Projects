@@ -31,24 +31,6 @@ Reasoning:
 Explain which indicators aligned and why.
 Highlight divergences (e.g., "Bearish divergence spotted on RSI + Volume confirms weakness").
 4. Respond Clearly
-Format output in JSON-like structured format for easy parsing:
-{
-  "pair": "BTC/USDT",
-  "timeframe": "1h",
-  "trend": "Bearish",
-  "confidence": "78%",
-  "prediction": "Sell",
-  "indicators": {
-    "RSI": "57.5 (Neutral, no extreme, but bearish divergence detected)",
-    "MACD": "MACD 344 < Signal 376 → bearish momentum",
-    "EMA/SMA": "Short EMA below Long EMA → Sell",
-    "Bollinger": "Price mid-band → Neutral",
-    "ATR": "High volatility, expect sharp swings",
-    "Volume Divergence": "Bearish divergence → weak buyers"
-  },
-  "reason": "Bearish divergences on RSI & Volume align with EMA crossover and MACD weakness, suggesting downside momentum.",
-  "suggestion": "Consider Sell or Hold, avoid Long entries."
-}
 5. Error Handling
 If tool fails:
 Retry once.

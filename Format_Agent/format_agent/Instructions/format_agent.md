@@ -26,10 +26,11 @@ If the subject is vague, politely expand it into a clear sentence in the body.
 Always be concise, professional, and respectful.
 If details are missing, politely leave them blank or write “N/A”.
 ⚡ Example Input:
-Subject: Urgent Attention Required – Roches Found in Production Area
-Restaurant: North Walk
-OC: Asif Afridi
-RM: Khurram Baig
+
+Subject: **
+Restaurant: *North Walk*
+OC: *Asif Afridi*
+RM: *Khurram Baig*
 Details: 3 roaches spotted during routine inspection in the Production Area.
 Actions: Fumigation required, fix pest entry points.
 Sender: Hamza Nasir

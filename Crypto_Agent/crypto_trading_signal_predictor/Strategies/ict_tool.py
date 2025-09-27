@@ -142,7 +142,7 @@ def ict_signal(
     context: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     params = params or {}
-    lookback = params.get("lookback", 200)
+    lookback = params.get("lookback", 500)  # increased default lookback
     df = candles.copy().reset_index(drop=True).tail(lookback).reset_index(drop=True)
     
     # --- Detect structure ---
@@ -150,41 +150,59 @@ def ict_signal(
     structure = detect_market_structure(df, swings)
     
     # --- Zones ---
-    obs = find_order_blocks(df, lookback=params.get("ob_lookback", 100), min_body_size=params.get("min_body_size", 0.6))
+    obs = find_order_blocks(df, lookback=params.get("ob_lookback", 150), min_body_size=params.get("min_body_size", 0.5))
     fvg = find_fvg(df)
     
     last_price = df['close'].iloc[-1]
     zone_matches, matched_zones = [], []
+    
+    # loosen zone matching to ±2%
     for z in obs:
-        if z['low'] * 0.99 <= last_price <= z['high'] * 1.01:
+        if z['low'] * 0.98 <= last_price <= z['high'] * 1.02:
             zone_matches.append('order_block')
             matched_zones.append(z)
     for g in fvg:
-        if g['bottom'] <= last_price <= g['top']:
+        if g['bottom'] * 0.98 <= last_price <= g['top'] * 1.02:
             zone_matches.append('fvg')
             matched_zones.append(g)
     
-    # --- Signal decision ---
-    signal_type = "none"
-    if structure == "bull" and 'order_block' in zone_matches:
-        signal_type = "Buy"
-    elif structure == "bear" and 'order_block' in zone_matches:
-        signal_type = "Sell"
-    elif structure == "bull" and 'fvg' in zone_matches:
-        signal_type = "Buy"
-    elif structure == "bear" and 'fvg' in zone_matches:
-        signal_type = "Sell"
+    # --- Liquidity sweep detection ---
+    liquidity_sweep = None
+    if swings["highs"]:
+        last_high_idx = swings["highs"][-1]
+        if df['high'].iloc[-1] > df['high'].iloc[last_high_idx] and df['close'].iloc[-1] < df['high'].iloc[last_high_idx]:
+            liquidity_sweep = "sell_side"  # swept above high and closed back below
+    if swings["lows"]:
+        last_low_idx = swings["lows"][-1]
+        if df['low'].iloc[-1] < df['low'].iloc[last_low_idx] and df['close'].iloc[-1] > df['low'].iloc[last_low_idx]:
+            liquidity_sweep = "buy_side"  # swept below low and closed back above
     
-    confidence = score_signal(structure, zone_matches)
+    # --- Signal decision (weaker + stronger) ---
+    signal_type = None
+    base_confidence = 0.0
+    
+    # structure bias alone (weak signal)
+    if structure == "bull":
+        signal_type, base_confidence = "Buy", 0.3
+    elif structure == "bear":
+        signal_type, base_confidence = "Sell", 0.3
+    
+    # confluence boosts
+    if 'order_block' in zone_matches or 'fvg' in zone_matches:
+        base_confidence += 0.3
+    if liquidity_sweep:
+        base_confidence += 0.2
+    
+    confidence = min(1.0, base_confidence)
     confidence_str = f"{round(confidence*100, 1)}%"
     
     # --- Stops/targets ---
     if signal_type == "Buy":
-        stop = min([z['low'] for z in matched_zones]) if matched_zones else last_price * 0.99
+        stop = min([z['low'] for z in matched_zones], default=last_price * 0.97)
         entry = last_price
         targets = [entry + (entry - stop) * 1.5, entry + (entry - stop) * 3]
     elif signal_type == "Sell":
-        stop = max([z['high'] for z in matched_zones]) if matched_zones else last_price * 1.01
+        stop = max([z['high'] for z in matched_zones], default=last_price * 1.03)
         entry = last_price
         targets = [entry - (stop - entry) * 1.5, entry - (stop - entry) * 3]
     else:
@@ -207,7 +225,7 @@ def ict_signal(
         for z in obs
     ]
     
-    # --- Simple liquidity levels (recent swing high/low) ---
+    # --- Liquidity levels ---
     liquidity_levels = []
     if swings["lows"]:
         liquidity_levels.append({"type": "buy_side", "price": f"{df['low'].iloc[swings['lows'][-1]]:.2f}"})
@@ -222,17 +240,16 @@ def ict_signal(
         "last_choch": "Down" if structure=="bull" else "Up" if structure=="bear" else None
     }
     
-    # --- Trader Commentary ---
-    reasoning_parts = []
-    reasoning_parts.append(f"Trend detected: {trend}.")
+    # --- Commentary ---
+    reasoning_parts = [f"Trend detected: {trend}."]
     if zone_matches:
-        reasoning_parts.append(f"Price is currently interacting with {', '.join(zone_matches)} zone(s).")
-    if signal_type != "none":
-        reasoning_parts.append(f"Generated {signal_type} signal with confidence {confidence_str}.")
-        reasoning_parts.append(f"Entry at {entry:.2f}, Stop Loss at {stop:.2f}, Targets: {', '.join([f'{t:.2f}' for t in targets])}.")
-    else:
-        reasoning_parts.append("No valid signal at this time due to lack of confluence.")
+        reasoning_parts.append(f"Price is near {', '.join(zone_matches)} zone(s).")
+    if liquidity_sweep:
+        reasoning_parts.append(f"Liquidity sweep detected on the {liquidity_sweep}.")
+    reasoning_parts.append(f"Generated {signal_type} signal with confidence {confidence_str}.")
+    reasoning_parts.append(f"Entry at {entry:.2f}, Stop Loss at {stop:.2f}, Targets: {', '.join([f'{t:.2f}' for t in targets])}.")
     reasoning_parts.append(f"Detected {len(obs)} order blocks and {len(fvg)} fair value gaps in the last {lookback} candles.")
+    
     commentary = " ".join(reasoning_parts)
     
     # --- Final result ---
@@ -240,7 +257,7 @@ def ict_signal(
         "strategy": "ICT",
         "symbol": symbol,
         "timeframe": timeframe,
-        "signal": signal_type if signal_type!="none" else None,
+        "signal": signal_type,
         "confidence": confidence_str,
         "last_price": f"{last_price:.2f}",
         "entry": f"{entry:.2f}" if entry else None,
@@ -254,6 +271,7 @@ def ict_signal(
         "candles_analyzed": len(df),
         "commentary": commentary
     }
+
 
 
 
