@@ -239,7 +239,20 @@ def ict_signal(
         "last_bos": "Up" if structure=="bull" else "Down" if structure=="bear" else None,
         "last_choch": "Down" if structure=="bull" else "Up" if structure=="bear" else None
     }
-    
+    def fmt(v):
+        try:
+            return f"{float(v):.2f}"
+        except:
+            return "N/A"
+
+        
+    safe_targets = []
+    if targets:
+        for t in targets:
+            safe_targets.append(fmt(t))
+    else:
+        safe_targets = ["N/A"]
+
     # --- Commentary ---
     reasoning_parts = [f"Trend detected: {trend}."]
     if zone_matches:
@@ -247,7 +260,9 @@ def ict_signal(
     if liquidity_sweep:
         reasoning_parts.append(f"Liquidity sweep detected on the {liquidity_sweep}.")
     reasoning_parts.append(f"Generated {signal_type} signal with confidence {confidence_str}.")
-    reasoning_parts.append(f"Entry at {entry:.2f}, Stop Loss at {stop:.2f}, Targets: {', '.join([f'{t:.2f}' for t in targets])}.")
+    reasoning_parts.append(
+    f"Entry at {fmt(entry)}, Stop Loss at {fmt(stop)}, Targets: {', '.join(safe_targets)}."
+    )
     reasoning_parts.append(f"Detected {len(obs)} order blocks and {len(fvg)} fair value gaps in the last {lookback} candles.")
     
     commentary = " ".join(reasoning_parts)

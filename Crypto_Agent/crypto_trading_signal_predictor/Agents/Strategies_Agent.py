@@ -93,7 +93,6 @@ strategies_agent = Agent(
     name="Strategies Agent",
     instructions=strategies_agent_instructions,
     tools=[
-        smc_strategy_tool,
         ict_strategy_tool
     ],
     model=None  

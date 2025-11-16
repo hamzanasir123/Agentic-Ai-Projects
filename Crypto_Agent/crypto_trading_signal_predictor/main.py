@@ -1,48 +1,85 @@
 import chainlit as cl
 import json
 import asyncio
-from agents import ItemHelpers, Runner
+from agents import Runner
 from Agents.Triage_Agent import triage_agent, config as triage_agent_config
 
 
+# -----------------------------------------
+# SAFE SERIALIZATION FOR NUMPY/PANDAS TYPES
+# -----------------------------------------
+def normalize_value(v):
+    try:
+        if hasattr(v, "item"):     # numpy scalar
+            return v.item()
+        if hasattr(v, "tolist"):   # numpy array or pandas
+            return v.tolist()
+        return v
+    except:
+        return str(v)
+
+
+# -----------------------------------------
+# SUMMARIZER FOR TOOL OUTPUT (NO JSON)
+# -----------------------------------------
+def summarize_output(output):
+    if isinstance(output, dict):
+        lines = []
+        for key, value in output.items():
+            value = normalize_value(value)
+            lines.append(f"- **{key}:** {value}")
+        return "### 🔎 Tool Summary\n" + "\n".join(lines)
+
+    if isinstance(output, list):
+        return "### 🔎 Tool Output:\n" + ", ".join(map(str, output))
+
+    # fallback
+    return f"### 🔎 Tool Output:\n{normalize_value(output)}"
+
+
+# -----------------------------------------
+# Think animation
+# -----------------------------------------
+async def start_animation(msg):
+    dots = 0
+    while True:
+        await asyncio.sleep(0.45)
+        dots = (dots + 1) % 4
+        msg.content = "🤖 Thinking" + ("." * dots)
+        await msg.update()
+
+
+# -----------------------------------------
+# CHAT START
+# -----------------------------------------
 @cl.on_chat_start
 async def start():
     await cl.Message(content="👋 Hi! The Triage Agent is ready.").send()
 
 
+# -----------------------------------------
+# MAIN MESSAGE HANDLER
+# -----------------------------------------
 @cl.on_message
 async def main(message: cl.Message):
-    # Gather conversation history
-    conversation = []
-    for m in cl.user_session.get("history", []):
-        conversation.append(f"{m['sender']}: {m['text']}")
-    conversation.append(f"user: {message.content}")
-    conversation_text = "\n".join(conversation)
 
-    # Store user input
+    # Build conversation context
     history = cl.user_session.get("history", [])
     history.append({"sender": "user", "text": message.content})
     cl.user_session.set("history", history)
 
-    # 🔹 Show "thinking..." placeholder with animated dots
+    conversation_text = "\n".join(f"{m['sender']}: {m['text']}" for m in history)
+
+    # Thinking animation message
     thinking_msg = cl.Message(content="🤖 Thinking", author="bot")
     await thinking_msg.send()
+    animation_task = asyncio.create_task(start_animation(thinking_msg))
 
-    async def animate_dots(msg: cl.Message):
-        dots = 0
-        while True:
-            await asyncio.sleep(0.5)
-            dots = (dots + 1) % 4
-            msg.content = "🤖 Thinking" + ("." * dots)
-            await msg.update()
-
-    task = asyncio.create_task(animate_dots(thinking_msg))
-
-    # 🔹 Prepare streaming message (final bot answer)
+    # Placeholder for streamed model answer
     msg = cl.Message(content="", author="bot")
     await msg.send()
 
-    # Run with streaming
+    # Run agent with streaming
     result = Runner.run_streamed(
         starting_agent=triage_agent,
         input=conversation_text,
@@ -50,59 +87,45 @@ async def main(message: cl.Message):
     )
 
     first_token = True
+
     async for event in result.stream_events():
-        event_type = type(event).__name__
+        event_name = type(event).__name__
 
-        if event_type == "RawResponsesStreamEvent":
-            data_type = type(event.data).__name__
+        # ----------------------------
+        # Model text streaming
+        # ----------------------------
+        if event_name == "RawResponsesStreamEvent":
+            event_type = type(event.data).__name__
 
-            if data_type == "ResponseTextDeltaEvent":
+            if event_type == "ResponseTextDeltaEvent":
                 delta = event.data.delta
                 if delta:
                     if first_token:
-                        task.cancel()
+                        animation_task.cancel()
                         await thinking_msg.remove()
                         first_token = False
                     await msg.stream_token(delta)
 
-            elif data_type == "ResponseCompletedEvent":
+            elif event_type == "ResponseCompletedEvent":
                 await msg.update()
 
-        elif hasattr(event, "item"):
-            if event.item.type == "tool_call_output_item":
-                output = event.item.output
-                if first_token:
-                    task.cancel()
-                    await thinking_msg.remove()
-                    first_token = False
+        # ----------------------------
+        # Tool output detected
+        # ----------------------------
+        elif hasattr(event, "item") and event.item.type == "tool_call_output_item":
+            output = event.item.output
 
-                if isinstance(output, dict):
-                    if all(isinstance(v, list) for v in output.values()):
-                        await cl.DataTable(
-                            name="Tool Result",
-                            columns=list(output.keys()),
-                            rows=list(zip(*output.values()))
-                        ).send()
-                    elif set(output.keys()) >= {"x", "y"}:
-                        await cl.Chart(
-                            name="Tool Chart",
-                            type="line",
-                            data={
-                                "labels": output["x"],
-                                "datasets": [{"label": "Values", "data": output["y"]}]
-                            }
-                        ).send()
-                    else:
-                        # JSON → code block inside same msg (avoid new message)
-                        await msg.stream_token(
-                            f"\n```json\n{json.dumps(output, indent=2)}\n```"
-                        )
-                else:
-                    await msg.stream_token(str(output))
+            if first_token:
+                animation_task.cancel()
+                await thinking_msg.remove()
+                first_token = False
 
+            summary_text = summarize_output(output)
+            await msg.stream_token("\n\n" + summary_text + "\n")
 
+    # Final update
     await msg.update()
 
-    # Save final response
+    # Save bot response in memory
     history.append({"sender": "bot", "text": msg.content})
     cl.user_session.set("history", history)
