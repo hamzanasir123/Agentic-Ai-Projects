@@ -198,7 +198,22 @@ def ict_signal(
     
     # --- Stops/targets ---
     if signal_type == "Buy":
-        stop = min([z['low'] for z in matched_zones], default=last_price * 0.97)
+        stop_values = []
+        for z in matched_zones:
+            if isinstance(z, dict):
+                # priority order for different zone types
+                if 'low' in z:
+                    stop_values.append(z['low'])
+                elif 'fvg_low' in z:
+                    stop_values.append(z['fvg_low'])
+                elif 'price' in z:
+                    stop_values.append(z['price'])
+                elif 'min' in z:
+                    stop_values.append(z['min'])
+            elif isinstance(z, (list, tuple)) and len(z) > 0:
+                stop_values.append(min(z))
+
+        stop = min(stop_values, default=last_price * 0.97)
         entry = last_price
         targets = [entry + (entry - stop) * 1.5, entry + (entry - stop) * 3]
     elif signal_type == "Sell":
@@ -319,6 +334,6 @@ async def ict_strategy_tool(input:str, timeframe:str):
         )
         return result
     except Exception as e:
-        print(f"❌ Error generating SMC Strategy for {pair}: {e}")
+        print(f"❌ Error generating ICT Strategy for {pair}: {e}")
         traceback.print_exc()
         return {"error": str(e), "pair": pair}
