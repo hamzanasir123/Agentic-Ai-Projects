@@ -54,7 +54,11 @@ async def start_animation(msg):
 # -----------------------------------------
 @cl.on_chat_start
 async def start():
-    await cl.Message(content="👋 Hi! The Triage Agent is ready.").send()
+    await cl.Message(content="""
+                     👋 Hi! The Triage Agent is ready.
+                     use ICT Strategy on BTC/USDT in 1h timeframe
+                     give me prediction on BTC/USDT in 1h timeframe 
+                     """).send()
 
 
 # -----------------------------------------
